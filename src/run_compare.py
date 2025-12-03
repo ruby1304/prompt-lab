@@ -1,21 +1,20 @@
 # src/run_compare.py
 from __future__ import annotations
 
-import json
 import csv
+import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from .chains import run_flow
+from .paths import DATA_DIR
 
 app = typer.Typer()
 console = Console()
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
 
 
 def load_test_cases(path: Path) -> List[Dict[str, Any]]:
@@ -55,8 +54,8 @@ def compare(
     limit: int = typer.Option(0, help="最多运行多少条（0=全部）"),
 ):
     """用同一批测试样本，对比多个 flow 的输出。
-    
-    JSONL 每行格式：{"id": 1, "input": "...", "context": "", "expected": "..."}
+
+    JSONL 每行可以包含任意变量；脚本会把除 id 以外的字段整体传入多个 flow。
     """
     flow_list = [x.strip() for x in flows.split(",") if x.strip()]
     if len(flow_list) < 2:
@@ -84,25 +83,20 @@ def compare(
     
     for idx, case in enumerate(cases, start=1):
         _id = case.get("id", idx)
-        input_text = case["input"]
-        context = case.get("context", "")
-        
-        console.print(f"\n[{idx}/{len(cases)}] id={_id}  input={input_text!r}")
-        
-        row: Dict[str, Any] = {
-            "id": _id,
-            "input": input_text,
-            "context": context,
-            "expected": case.get("expected", ""),
-        }
-        
+        variables = {k: v for k, v in case.items() if k != "id"}
+
+        preview = variables.get("input") or ",".join(list(variables.keys())[:3]) or "<空>"
+        console.print(f"\n[{idx}/{len(cases)}] id={_id}  variables={preview!r}")
+
+        row: Dict[str, Any] = {"id": _id, **variables}
+
         # 依次跑每个 flow
         for flow_name in flow_list:
             console.print(f"  -> Running flow: [cyan]{flow_name}[/cyan]")
-            output = run_flow(flow_name, input_text, context)
+            output = run_flow(flow_name, extra_vars=variables)
             col_name = f"output__{flow_name}"
             row[col_name] = output
-            
+
         rows.append(row)
 
     if not rows:

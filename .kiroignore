@@ -1,0 +1,8 @@
+# 阻止 Kiro 访问敏感文件
+.env
+*.key
+*.pem
+secrets/
+private/
+.env.local
+.env.production

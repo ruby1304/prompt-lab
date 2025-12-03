@@ -1,0 +1,13 @@
+{
+  "ignoredFiles": [
+    ".env",
+    "*.key",
+    "*.pem",
+    "secrets/*"
+  ],
+  "ignoredPatterns": [
+    "**/secrets/**",
+    "**/*.env",
+    "**/private/**"
+  ]
+}

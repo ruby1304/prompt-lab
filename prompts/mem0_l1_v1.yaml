@@ -36,7 +36,7 @@ user_template: |
   开始。
 
 defaults:
-  user_name: "用户"
+  user_name: "{user_name}"
   character_profile: "默认角色设定"
   current_schedule_time: "未知时间"
   current_schedule_full_desc: "暂无日程安排"

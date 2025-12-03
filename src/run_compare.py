@@ -85,8 +85,7 @@ def compare(
         _id = case.get("id", idx)
         variables = {k: v for k, v in case.items() if k != "id"}
 
-        preview = variables.get("input") or ",".join(list(variables.keys())[:3]) or "<空>"
-        console.print(f"\n[{idx}/{len(cases)}] id={_id}  variables={preview!r}")
+        console.print(f"\n[{idx}/{len(cases)}] id={_id}")
 
         row: Dict[str, Any] = {"id": _id, **variables}
 
@@ -96,6 +95,10 @@ def compare(
             output = run_flow(flow_name, extra_vars=variables)
             col_name = f"output__{flow_name}"
             row[col_name] = output
+            
+            # 打印输出结果的前200个字符
+            output_preview = output[:200] + "..." if len(output) > 200 else output
+            console.print(f"     Output: {output_preview}")
 
         rows.append(row)
 
@@ -112,17 +115,20 @@ def compare(
 
     console.print(f"[green]完成！结果已写入：[/] {out_path}")
 
-    # 预览前几条
+    # 预览前几条 - 只显示 id 和输出列
     table = Table(title="Compare Results Preview", show_lines=True)
-    for col in fieldnames[:6]:  # 前几列固定 + 一两个输出列
+    
+    # 找出输出列
+    output_cols = [col for col in fieldnames if col.startswith("output__")]
+    preview_cols = ["id"] + output_cols
+    
+    for col in preview_cols:
         table.add_column(col, overflow="fold")
     
     for row in rows[:3]:
         preview_row = []
-        for col in fieldnames[:6]:
+        for col in preview_cols:
             value = row.get(col, "")
-            if isinstance(value, str) and len(value) > 200:
-                value = value[:200] + "..."
             preview_row.append(str(value))
         table.add_row(*preview_row)
     

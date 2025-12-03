@@ -1,20 +1,16 @@
 # src/chains.py
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict, Iterable, Mapping
 
 import yaml
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableSerializable
+from langchain_openai import ChatOpenAI
 
 from .config import get_openai_model_name, get_openai_temperature
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-PROMPT_DIR = ROOT_DIR / "prompts"
+from .paths import PROMPT_DIR
 
 
 def load_flow_config(flow_name: str) -> Dict[str, Any]:
@@ -26,25 +22,51 @@ def load_flow_config(flow_name: str) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def build_chain(flow_cfg: Dict[str, Any]) -> RunnableSerializable:
-    """根据 flow 配置构建一个 LCEL Chain"""
+def build_prompt(flow_cfg: Mapping[str, Any]) -> ChatPromptTemplate:
+    """根据 flow 配置构建 Prompt 对象。"""
+
     system_prompt: str = flow_cfg["system_prompt"]
     user_template: str = flow_cfg["user_template"]
 
-    prompt = ChatPromptTemplate.from_messages(
+    return ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
             ("user", user_template),
         ]
     )
 
+
+def build_chain(prompt: ChatPromptTemplate, flow_cfg: Mapping[str, Any]) -> RunnableSerializable:
+    """根据 Prompt 构建一个 LCEL Chain，并允许配置模型参数。"""
+
     llm = ChatOpenAI(
-        model=get_openai_model_name(),
-        temperature=get_openai_temperature(),
+        model=flow_cfg.get("model", get_openai_model_name()),
+        temperature=flow_cfg.get("temperature", get_openai_temperature()),
     )
 
-    chain = prompt | llm
-    return chain
+    return prompt | llm
+
+
+def _merge_variables(
+    required_vars: Iterable[str],
+    provided_vars: Mapping[str, Any],
+    fallback: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """确保每个必需变量都有值，并应用兜底逻辑。
+
+    优先级：用户传入 > prompt 配置 defaults > 全局默认空字符串。
+    """
+
+    fallback = fallback or {}
+    merged: Dict[str, Any] = {}
+    for key in required_vars:
+        if key in provided_vars:
+            merged[key] = provided_vars[key]
+        elif key in fallback:
+            merged[key] = fallback[key]
+        else:
+            merged[key] = ""
+    return merged
 
 
 def run_flow(
@@ -56,44 +78,31 @@ def run_flow(
     """
     对外暴露的核心接口：
     - flow_name: 对应 prompts/{flow_name}.yaml
-    - input_text: 用户输入（可选，为了向后兼容）
-    - context: 额外上下文（可选，为了向后兼容）
-    - extra_vars: 变量字典，包含prompt模板需要的所有变量
+    - input_text/context: 为了兼容旧用法，自动补充到变量表
+    - extra_vars: 任意变量字典，允许多于或少于 Prompt 模板需要的变量
+
+    提示词中的占位符（无论位于 system 还是 user）都会从同一份变量表中解析，
+    缺失值依次使用 defaults 或空字符串兜底。
     """
+
     flow_cfg = load_flow_config(flow_name)
-    chain = build_chain(flow_cfg)
+    prompt = build_prompt(flow_cfg)
+    chain = build_chain(prompt, flow_cfg)
 
-    # 如果extra_vars包含了所有需要的变量，就直接使用
-    # 否则使用传统的input/context方式（向后兼容）
+    provided_vars: Dict[str, Any] = {}
     if extra_vars:
-        variables = extra_vars.copy()
-        # 如果extra_vars中没有input和context，但函数参数有，则添加进去
-        if "input" not in variables and input_text:
-            variables["input"] = input_text
-        if "context" not in variables and context:
-            variables["context"] = context
-    else:
-        variables = {
-            "input": input_text,
-            "context": context,
-        }
+        provided_vars.update(extra_vars)
+    if input_text:
+        provided_vars.setdefault("input", input_text)
+    if context:
+        provided_vars.setdefault("context", context)
 
-    # 为常见的缺失变量提供默认值
-    default_values = {
-        "user_name": "用户",
-        "input": "",
-        "context": "",
-        "character_profile": "默认角色设定",
-        "chat_round_30": "暂无对话记录",
-        "cloth_prompt": "默认服装",
-        "current_schedule_full_desc": "暂无日程安排",
-        "current_schedule_time": "未知时间",
-    }
-    
-    for key, default_value in default_values.items():
-        if key not in variables:
-            variables[key] = default_value
+    required_vars = prompt.input_variables
+    resolved_vars = _merge_variables(
+        required_vars,
+        provided_vars,
+        fallback=flow_cfg.get("defaults", {}),
+    )
 
-    result: BaseMessage = chain.invoke(variables)
-    # ChatOpenAI 返回的是一条消息对象
+    result: BaseMessage = chain.invoke(resolved_vars)
     return result.content

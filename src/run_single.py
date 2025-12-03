@@ -7,7 +7,7 @@ from rich.panel import Panel
 
 import json
 
-from .chains import run_flow
+from .chains import run_flow_with_tokens
 
 app = typer.Typer()
 console = Console()
@@ -42,7 +42,7 @@ def chat(
     except ValueError as exc:  # 保持提示友好
         raise typer.BadParameter(str(exc))
 
-    output = run_flow(flow, text, context, extra_vars=extra_vars)
+    output, token_info = run_flow_with_tokens(flow, text, context, extra_vars=extra_vars)
 
     console.print(
         Panel.fit(
@@ -51,6 +51,13 @@ def chat(
             border_style="green",
         )
     )
+    
+    # 显示token使用信息
+    if token_info:
+        console.print(f"\n[bold cyan]Token 使用情况:[/]")
+        console.print(f"  输入 Tokens: {token_info.get('input_tokens', 0):,}")
+        console.print(f"  输出 Tokens: {token_info.get('output_tokens', 0):,}")
+        console.print(f"  总 Tokens: {token_info.get('total_tokens', 0):,}")
 
 
 def main():

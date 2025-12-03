@@ -1,0 +1,26 @@
+id: "judge_default"
+name: "通用评估 Agent"
+type: "judge"
+description: |
+  一个通用的 LLM 评估 Agent，用于根据 TaskAgent 提供的业务目标和评估维度，
+  对模型输出进行自动打分与简短点评。输出统一的 JSON 结构，便于后续分析。
+
+# Judge 自己用的模型与温度
+model: "doubao-1-5-pro-32k-250115"
+temperature: 0.0
+
+# Judge 自己的「提示词版本」列表
+flows:
+  - name: "judge_v1"
+    file: "judge_v1.yaml"
+    notes: "通用评估提示词，基于业务目标自动推理评价标准"
+  - name: "judge_v2"
+    file: "judge_v2.yaml"
+    notes: "专门针对对话总结任务的评估提示词，包含总结质量专项检查"
+
+# Judge Agent 不需要这些字段
+default_testset: ""
+extra_testsets: []
+evaluation: {}
+expectations: {}
+business_goal: ""

@@ -1,7 +1,7 @@
 # src/chains.py
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Dict, Iterable, Mapping, Tuple
 
 import yaml
 from langchain_core.messages import BaseMessage
@@ -106,3 +106,65 @@ def run_flow(
 
     result: BaseMessage = chain.invoke(resolved_vars)
     return result.content
+
+
+def run_flow_with_tokens(
+    flow_name: str,
+    input_text: str = "",
+    context: str = "",
+    extra_vars: Dict[str, Any] | None = None,
+) -> Tuple[str, Dict[str, int]]:
+    """
+    带token统计的flow运行接口
+    返回: (输出内容, token统计信息)
+    """
+    
+    flow_cfg = load_flow_config(flow_name)
+    prompt = build_prompt(flow_cfg)
+    
+    # 使用with_config来启用token统计
+    llm = ChatOpenAI(
+        model=flow_cfg.get("model", get_openai_model_name()),
+        temperature=flow_cfg.get("temperature", get_openai_temperature()),
+    )
+    
+    chain = prompt | llm
+
+    provided_vars: Dict[str, Any] = {}
+    if extra_vars:
+        provided_vars.update(extra_vars)
+    if input_text:
+        provided_vars.setdefault("input", input_text)
+    if context:
+        provided_vars.setdefault("context", context)
+
+    required_vars = prompt.input_variables
+    resolved_vars = _merge_variables(
+        required_vars,
+        provided_vars,
+        fallback=flow_cfg.get("defaults", {}),
+    )
+
+    # 使用with_config来获取token使用信息
+    result = chain.invoke(resolved_vars)
+    
+    # 从result中提取token信息
+    token_info = {}
+    if hasattr(result, 'usage_metadata') and result.usage_metadata:
+        usage = result.usage_metadata
+        token_info = {
+            'input_tokens': usage.get('input_tokens', 0),
+            'output_tokens': usage.get('output_tokens', 0),
+            'total_tokens': usage.get('total_tokens', 0)
+        }
+    else:
+        # 如果没有usage_metadata，尝试从response_metadata获取
+        if hasattr(result, 'response_metadata') and result.response_metadata:
+            usage = result.response_metadata.get('token_usage', {})
+            token_info = {
+                'input_tokens': usage.get('prompt_tokens', 0),
+                'output_tokens': usage.get('completion_tokens', 0),
+                'total_tokens': usage.get('total_tokens', 0)
+            }
+    
+    return result.content, token_info

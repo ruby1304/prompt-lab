@@ -10,8 +10,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .chains import run_flow
+from .chains import run_flow_with_tokens
 from .paths import DATA_DIR
+from .agent_registry import load_agent, list_available_agents
 
 console = Console()
 
@@ -28,9 +29,10 @@ def load_test_cases(path: Path) -> List[Dict[str, Any]]:
 
 
 def run(
-    flow: str = typer.Option("flow_demo", help="使用的 flow 名称，对应 prompts/{flow}.yaml"),
-    infile: str = typer.Option("test_cases.demo.jsonl", help="输入测试集文件，默认 data/test_cases.demo.jsonl"),
+    flow: str = typer.Option("", help="使用的 flow 名称；如未指定且提供了 agent，则用 agent 的第一个 flow"),
+    infile: str = typer.Option("", help="输入测试集文件；如未指定且提供了 agent，则用 agent 的 default_testset"),
     outfile: str = typer.Option("results.demo.csv", help="输出结果文件名，默认 data/results.demo.csv"),
+    agent: str = typer.Option("", help="agent id，对应 agents/{agent}.yaml"),
     limit: int = typer.Option(0, help="最多运行多少条（0=全部）"),
 ):
     """
@@ -39,19 +41,65 @@ def run(
     JSONL 每行是一个变量字典，可以包含除 `id/expected` 外任意字段。
     模板未用到的字段会被忽略，缺失字段将按 Prompt 配置的 defaults 或空字符串兜底。
     """
+    # 处理 agent 配置
+    agent_cfg = None
+    if agent:
+        try:
+            agent_cfg = load_agent(agent)
+            console.rule("[bold blue]Prompt Lab · Batch Run")
+            console.print(f"[bold]Agent[/]: {agent_cfg.id} - {agent_cfg.name}")
+            console.print(f"[dim]{agent_cfg.description}[/]")
+        except FileNotFoundError as e:
+            console.print(f"[red]错误：{e}[/]")
+            available_agents = list_available_agents()
+            if available_agents:
+                console.print(f"[yellow]可用的 agents：{', '.join(available_agents)}[/]")
+            raise typer.Exit(1)
+    else:
+        console.rule("[bold blue]Prompt Lab · Batch Run")
+
+    # 解析 flow
+    if not flow:
+        if agent_cfg and agent_cfg.flows:
+            flow = agent_cfg.flows[0].name
+            console.print(f"[bold]Flow[/]: {flow} (使用 agent 默认 flow)")
+        else:
+            console.print("[red]错误：必须指定 --flow，或者使用 --agent 且保证 agent 配置中有 flows。[/]")
+            raise typer.Exit(1)
+    else:
+        console.print(f"[bold]Flow[/]: {flow}")
+
+    # 解析 infile
+    if not infile:
+        if agent_cfg:
+            infile = agent_cfg.default_testset
+            console.print(f"[bold]Testset[/]: {infile} (使用 agent 默认测试集)")
+        else:
+            console.print("[red]错误：必须指定 --infile，或者使用 --agent。[/]")
+            raise typer.Exit(1)
+    else:
+        console.print(f"[bold]Testset[/]: {infile}")
+
     in_path = DATA_DIR / infile
     out_path = DATA_DIR / outfile
 
-    console.rule("[bold blue]Prompt Lab · Batch Run")
-    console.print(f"[bold]Flow[/]: {flow}")
     console.print(f"[bold]Input file[/]: {in_path}")
     console.print(f"[bold]Output file[/]: {out_path}")
+
+    # 检查输入文件是否存在
+    if not in_path.exists():
+        console.print(f"[red]错误：测试文件不存在：[/] {in_path}")
+        if agent_cfg:
+            console.print(f"[yellow]提示：agent '{agent_cfg.id}' 的可用测试集：{', '.join(agent_cfg.all_testsets)}[/]")
+        raise typer.Exit(1)
 
     cases = load_test_cases(in_path)
     if limit > 0:
         cases = cases[:limit]
 
     rows: List[Dict[str, Any]] = []
+    total_tokens = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    
     for idx, case in enumerate(cases, start=1):
         _id = case.get("id", idx)
 
@@ -62,14 +110,21 @@ def run(
         display_info = case.get("input") or ",".join(list(variables.keys())[:3]) or "<空>"
         console.print(f"[{idx}/{len(cases)}] id={_id}  variables={display_info!r}")
 
-        output = run_flow(flow, extra_vars=variables)
+        output, token_info = run_flow_with_tokens(flow, extra_vars=variables)
+        
+        # 累计token统计
+        for key in total_tokens:
+            total_tokens[key] += token_info.get(key, 0)
 
-        # 构建结果行，包含所有原始变量
+        # 构建结果行，包含所有原始变量和token信息
         result_row = {"id": _id}
         result_row.update(variables)  # 添加所有变量
         result_row.update({
             "expected": case.get("expected", ""),
             "output": output,
+            "input_tokens": token_info.get("input_tokens", 0),
+            "output_tokens": token_info.get("output_tokens", 0),
+            "total_tokens": token_info.get("total_tokens", 0),
         })
         rows.append(result_row)
 
@@ -84,13 +139,30 @@ def run(
 
     console.print(f"[green]完成！结果已写入：[/] {out_path}")
 
+    # 显示token统计信息
+    console.rule("[bold cyan]Token 统计")
+    avg_input_tokens = total_tokens["input_tokens"] / len(rows) if rows else 0
+    avg_output_tokens = total_tokens["output_tokens"] / len(rows) if rows else 0
+    avg_total_tokens = total_tokens["total_tokens"] / len(rows) if rows else 0
+    
+    token_table = Table(title="Token Usage Summary")
+    token_table.add_column("指标", style="bold")
+    token_table.add_column("总计", justify="right")
+    token_table.add_column("平均每个case", justify="right")
+    
+    token_table.add_row("输入 Tokens", f"{total_tokens['input_tokens']:,}", f"{avg_input_tokens:.1f}")
+    token_table.add_row("输出 Tokens", f"{total_tokens['output_tokens']:,}", f"{avg_output_tokens:.1f}")
+    token_table.add_row("总 Tokens", f"{total_tokens['total_tokens']:,}", f"{avg_total_tokens:.1f}")
+    
+    console.print(token_table)
+
     # 简单预览前几条
     table = Table(title="Sample Results Preview", show_lines=True)
     # 动态确定要显示的列
     preview_cols = ["id"]
     if "input" in rows[0]:
         preview_cols.append("input")
-    preview_cols.extend(["expected", "output"])
+    preview_cols.extend(["expected", "output", "total_tokens"])
 
     for col in preview_cols:
         table.add_column(col, overflow="fold")
@@ -99,7 +171,11 @@ def run(
         row_data = [str(row["id"])]
         if "input" in row:
             row_data.append(row["input"])
-        row_data.extend([row.get("expected", ""), row["output"][:200]])
+        row_data.extend([
+            row.get("expected", ""), 
+            row["output"][:200], 
+            str(row.get("total_tokens", 0))
+        ])
         table.add_row(*row_data)
     console.print(table)
 

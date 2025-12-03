@@ -4,18 +4,16 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from .chains import run_flow
+from .paths import DATA_DIR
 
 console = Console()
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
 
 
 def load_test_cases(path: Path) -> List[Dict[str, Any]]:
@@ -37,8 +35,9 @@ def run(
 ):
     """
     批量跑测试集：读取 JSONL -> 调用模型 -> 写入 CSV
-    JSONL 每行格式：
-    {"id": 1, "input": "...", "context": "", "expected": "..."}
+
+    JSONL 每行是一个变量字典，可以包含除 `id/expected` 外任意字段。
+    模板未用到的字段会被忽略，缺失字段将按 Prompt 配置的 defaults 或空字符串兜底。
     """
     in_path = DATA_DIR / infile
     out_path = DATA_DIR / outfile
@@ -55,12 +54,12 @@ def run(
     rows: List[Dict[str, Any]] = []
     for idx, case in enumerate(cases, start=1):
         _id = case.get("id", idx)
-        
+
         # 提取所有变量，除了id和expected
         variables = {k: v for k, v in case.items() if k not in ["id", "expected"]}
-        
+
         # 为了向后兼容，如果有input字段，显示它；否则显示前几个变量
-        display_info = case.get("input", str(list(variables.keys())[:3]))
+        display_info = case.get("input") or ",".join(list(variables.keys())[:3]) or "<空>"
         console.print(f"[{idx}/{len(cases)}] id={_id}  variables={display_info!r}")
 
         output = run_flow(flow, extra_vars=variables)
@@ -92,10 +91,10 @@ def run(
     if "input" in rows[0]:
         preview_cols.append("input")
     preview_cols.extend(["expected", "output"])
-    
+
     for col in preview_cols:
         table.add_column(col, overflow="fold")
-    
+
     for row in rows[:3]:
         row_data = [str(row["id"])]
         if "input" in row:

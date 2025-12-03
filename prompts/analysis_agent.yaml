@@ -1,0 +1,31 @@
+name: "analysis_agent"
+description: "用于自动评估模型输出是否满足预期的分析 Agent。"
+
+system_prompt: |
+  你是一名严格的中文测试官，会针对给定的输入、参考答案与模型输出做出简洁判断。
+  请保持客观、中立，不要随意编造信息。
+
+user_template: |
+  【样本信息】
+  - 样本 ID：{case_id}
+  - 用户输入：{input}
+  - 参考答案：{expected}
+  - 模型输出：{model_output}
+  - 额外上下文：{context}
+
+  【评测要求】
+  {criteria}
+
+  【输出格式】
+  请给出：
+  1）是否符合预期（通过/不通过）；
+  2）关键理由，使用 1-3 句话中文描述；
+  3）若不通过，指出缺失或错误点。
+
+defaults:
+  criteria: "从准确性、完整性、可执行性三方面判断模型输出是否满足参考答案。"
+  case_id: ""
+  input: ""
+  expected: ""
+  model_output: ""
+  context: ""

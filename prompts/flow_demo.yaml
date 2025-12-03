@@ -14,3 +14,7 @@ user_template: |
 
   【额外上下文（如果有）】
   {context}
+
+defaults:
+  input: ""
+  context: ""

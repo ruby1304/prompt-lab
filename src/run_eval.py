@@ -15,6 +15,7 @@ from .chains import run_flow_with_tokens
 from .paths import DATA_DIR
 from .agent_registry import load_agent, list_available_agents
 from .eval_llm_judge import build_judge_chain, judge_one
+from .rule_engine import apply_rules as apply_rules_engine
 
 app = typer.Typer()
 console = Console()
@@ -32,7 +33,7 @@ def load_test_cases(path: Path) -> List[Dict[str, Any]]:
     return cases
 
 
-def generate_output_filename(agent_id: str, flows: List[str], with_judge: bool) -> str:
+def generate_output_filename(agent_id: str, flows: List[str], with_rules: bool, with_judge: bool) -> str:
     """生成输出文件名"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if len(flows) == 1:
@@ -40,8 +41,112 @@ def generate_output_filename(agent_id: str, flows: List[str], with_judge: bool) 
     else:
         flow_part = "compare"
     
-    suffix = "eval" if with_judge else "results"
+    # 根据评估类型确定后缀
+    if with_judge:
+        suffix = "eval"
+    elif with_rules:
+        suffix = "rules"
+    else:
+        suffix = "results"
+    
     return f"{agent_id}_{flow_part}.{suffix}.{timestamp}.csv"
+
+
+def apply_rules_to_outputs(agent_cfg, rows: List[Dict[str, Any]], flow_list: List[str]) -> List[Dict[str, Any]]:
+    """对输出结果应用规则评估"""
+    eval_cfg = agent_cfg.evaluation or {}
+    rules = eval_cfg.get("rules", []) or []
+    
+    if not rules:
+        # 没有规则配置，添加默认通过的规则字段
+        for row in rows:
+            if len(flow_list) == 1:
+                row["rule_pass"] = 1
+                row["rule_violations"] = ""
+            else:
+                for flow_name in flow_list:
+                    row[f"rule_pass__{flow_name}"] = 1
+                    row[f"rule_violations__{flow_name}"] = ""
+        return rows
+    
+    # 应用规则评估
+    result_rows = []
+    for row in rows:
+        result = dict(row)
+        
+        if len(flow_list) == 1:
+            # 单flow模式
+            output_text = (row.get("output") or "").strip()
+            rule_result = apply_rules_engine(rules, output_text)
+            result.update(rule_result)
+        else:
+            # 多flow对比模式
+            for flow_name in flow_list:
+                output_col = f"output__{flow_name}"
+                output_text = (row.get(output_col) or "").strip()
+                
+                # 创建临时行用于规则评估
+                temp_row = {"output": output_text}
+                rule_result = apply_rules_engine(rules, output_text)
+                
+                result[f"rule_pass__{flow_name}"] = rule_result["rule_pass"]
+                result[f"rule_violations__{flow_name}"] = rule_result["rule_violations"]
+        
+        result_rows.append(result)
+    
+    return result_rows
+
+
+def print_rule_stats(rows: List[Dict[str, Any]], flow_list: List[str], console: Console):
+    """打印规则评估统计"""
+    console.rule("[bold yellow]规则评估统计[/bold yellow]")
+    
+    if len(flow_list) == 1:
+        # 单flow统计
+        total = len(rows)
+        passed = sum(1 for r in rows if r.get("rule_pass") == 1)
+        failed = total - passed
+        
+        console.print(f"总样本: {total}, 通过: {passed} ({passed/total*100:.1f}%), 失败: {failed} ({failed/total*100:.1f}%)")
+        
+        if failed > 0:
+            violation_counts = {}
+            for r in rows:
+                if r.get("rule_pass") == 0:
+                    violations = r.get("rule_violations", "").split(",")
+                    for v in violations:
+                        if v.strip():
+                            violation_counts[v.strip()] = violation_counts.get(v.strip(), 0) + 1
+            
+            if violation_counts:
+                console.print("\n违规统计:")
+                for rule_id, count in sorted(violation_counts.items(), key=lambda x: x[1], reverse=True):
+                    console.print(f"  {rule_id}: {count} 次")
+    else:
+        # 多flow统计
+        rule_table = Table(title="Rule Evaluation by Flow")
+        rule_table.add_column("Flow", style="bold")
+        rule_table.add_column("Total", justify="right")
+        rule_table.add_column("Passed", justify="right")
+        rule_table.add_column("Failed", justify="right")
+        rule_table.add_column("Pass Rate", justify="right")
+        
+        for flow_name in flow_list:
+            pass_field = f"rule_pass__{flow_name}"
+            total = len(rows)
+            passed = sum(1 for r in rows if r.get(pass_field) == 1)
+            failed = total - passed
+            pass_rate = f"{passed/total*100:.1f}%" if total > 0 else "0%"
+            
+            rule_table.add_row(
+                flow_name,
+                str(total),
+                str(passed),
+                str(failed),
+                pass_rate
+            )
+        
+        console.print(rule_table)
 
 
 @app.callback(invoke_without_command=True)
@@ -65,19 +170,33 @@ def run_eval(
         "-o",
         help="输出文件名；为空则自动生成",
     ),
+    rules: bool = typer.Option(
+        False,
+        "--rules",
+        "-r",
+        help="是否进行规则评估",
+    ),
     judge: bool = typer.Option(
         False,
         "--judge",
         "-j",
-        help="是否在执行完成后立即进行judge评估",
+        help="是否进行LLM judge评估（会自动启用规则评估）",
     ),
     limit: int = typer.Option(0, help="最多运行多少条（0=全部）"),
 ):
     """
-    统一的评估执行工具：批量运行flow并可选择立即进行judge评估
+    统一的评估执行工具：批量运行flow并可选择进行规则评估和LLM judge评估
     
-    支持单个flow执行或多个flow对比执行，可选择是否立即进行LLM judge评估。
+    支持三种评估模式：
+    1. 仅执行：不加任何评估参数
+    2. 规则评估：--rules
+    3. 规则+模型评估：--judge（会自动启用规则评估）
+    
+    支持单个flow执行或多个flow对比执行。
     """
+    # 参数逻辑处理
+    if judge:
+        rules = True  # judge模式自动启用规则评估
     # 加载agent配置
     try:
         agent_cfg = load_agent(agent)
@@ -113,7 +232,7 @@ def run_eval(
 
     # 生成输出文件名
     if not outfile:
-        outfile = generate_output_filename(agent_cfg.id, flow_list, judge)
+        outfile = generate_output_filename(agent_cfg.id, flow_list, rules, judge)
         console.print(f"[bold]Output[/]: {outfile} (自动生成)")
     else:
         console.print(f"[bold]Output[/]: {outfile}")
@@ -137,8 +256,23 @@ def run_eval(
         raise typer.Exit()
 
     console.print(f"[bold]Cases[/]: {len(cases)} 条")
-    if judge:
-        console.print(f"[bold]Judge[/]: 启用 (将在执行完成后自动评估)")
+    
+    # 检查是否有规则配置
+    rules = agent_cfg.evaluation.get("rules", []) or [] if agent_cfg.evaluation else []
+    
+    # 显示评估模式
+    eval_modes = []
+    if rules and not judge:
+        eval_modes.append("规则评估")
+    if judge and rules:
+        eval_modes.append("规则+模型评估")
+    elif judge:
+        eval_modes.append("模型评估")
+    
+    if eval_modes:
+        console.print(f"[bold]Evaluation[/]: {' + '.join(eval_modes)}")
+    else:
+        console.print(f"[bold]Evaluation[/]: 仅执行（无评估）")
 
     # 执行阶段
     console.rule("[bold green]执行阶段[/bold green]")
@@ -184,7 +318,29 @@ def run_eval(
 
         rows.append(row)
 
-    # 保存执行结果
+    # 规则评估阶段
+    if rules:
+        console.rule("[bold yellow]规则评估阶段[/bold yellow]")
+        
+        # 检查规则配置
+        eval_cfg = agent_cfg.evaluation or {}
+        rule_configs = eval_cfg.get("rules", []) or []
+        
+        if not rule_configs:
+            console.print("[yellow]该 agent 没有配置规则，将跳过规则评估[/]")
+        else:
+            console.print(f"[blue]应用 {len(rule_configs)} 条规则：[/]")
+            for rule in rule_configs:
+                console.print(f"  - {rule.get('id', 'unknown')}: {rule.get('kind', 'unknown')}")
+        
+        # 应用规则评估
+        rows = apply_rules_to_outputs(agent_cfg, rows, flow_list)
+        
+        # 显示规则统计
+        if rule_configs:
+            print_rule_stats(rows, flow_list, console)
+
+    # 保存执行结果（包含规则评估结果）
     fieldnames = list(rows[0].keys())
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -228,6 +384,10 @@ def run_eval(
 
     # Judge评估阶段
     if judge:
+        # 在judge评估之前显示执行结果预览
+        console.rule("[bold blue]执行结果预览[/bold blue]")
+        show_execution_results_preview(rows, flow_list)
+        
         console.rule("[bold magenta]Judge 评估阶段[/bold magenta]")
         
         # 获取judge配置
@@ -345,30 +505,428 @@ def run_eval(
 
     # 最终预览
     console.rule("[bold blue]结果预览[/bold blue]")
-    preview_table = Table(title="Results Preview", show_lines=True)
     
-    if len(flow_list) == 1:
-        preview_cols = ["id", "input", "expected", "output", "total_tokens"]
+    # 根据不同情况显示不同的预览内容
+    if judge and eval_rows:
+        # 有judge评估结果时，显示评估结果预览
+        show_judge_preview(eval_rows, flow_list)
+    elif rules and len(flow_list) > 1:
+        # 多flow对比 + 规则评估
+        show_compare_with_rules_preview(rows, flow_list, fieldnames)
+    elif rules and len(flow_list) == 1:
+        # 单flow + 规则评估
+        show_single_with_rules_preview(rows, fieldnames)
+    elif len(flow_list) > 1:
+        # 多flow对比，无评估
+        show_compare_preview(rows, flow_list, fieldnames)
     else:
-        output_cols = [col for col in fieldnames if col.startswith("output__")]
-        preview_cols = ["id"] + output_cols[:2]  # 只显示前两个flow的输出
+        # 单flow，无评估
+        show_single_preview(rows, fieldnames)
+
+
+def show_execution_results_preview(rows: List[Dict[str, Any]], flow_list: List[str]):
+    """显示执行结果完整输出"""
+    if len(flow_list) == 1:
+        # 单flow完整输出
+        preview_table = Table(title="Execution Results", show_lines=True)
+        preview_table.add_column("ID", style="bold")
+        preview_table.add_column("Output", overflow="fold")
+        preview_table.add_column("Tokens", justify="right")
+        
+        for row in rows[:3]:
+            output = str(row.get("output", ""))
+            tokens = str(row.get("total_tokens", ""))
+            
+            preview_table.add_row(
+                str(row.get("id", "")),
+                output,  # 显示完整输出，不截断
+                tokens
+            )
+    else:
+        # 多flow对比完整输出
+        preview_table = Table(title="Execution Results", show_lines=True)
+        preview_table.add_column("ID", style="bold")
+        
+        # 显示前两个flow的输出
+        for flow in flow_list[:2]:
+            preview_table.add_column(f"{flow}", overflow="fold")
+        
+        for row in rows[:3]:
+            preview_row = [str(row.get("id", ""))]
+            
+            for flow in flow_list[:2]:
+                output = str(row.get(f"output__{flow}", ""))
+                preview_row.append(output)  # 显示完整输出，不截断
+            
+            preview_table.add_row(*preview_row)
     
-    # 只显示存在的列
-    preview_cols = [col for col in preview_cols if col in fieldnames]
+    console.print(preview_table)
+
+
+def show_judge_preview(eval_rows: List[Dict[str, Any]], flow_list: List[str]):
+    """显示judge评估结果统计"""
+    console.rule("[bold cyan]Judge 评估统计[/bold cyan]")
+    if len(flow_list) > 1:
+        show_judge_stats_by_flow(eval_rows, flow_list)
+    else:
+        show_judge_stats_single(eval_rows)
+
+
+def show_judge_stats_by_flow(eval_rows: List[Dict[str, Any]], flow_list: List[str]):
+    """显示按flow分组的judge统计"""
+    stats_table = Table(title="Judge Stats by Flow")
+    stats_table.add_column("Flow", style="bold")
+    stats_table.add_column("样本数", justify="right")
+    stats_table.add_column("平均分", justify="right")
+    stats_table.add_column("分数范围", justify="center")
+    stats_table.add_column("Must-Have通过率", justify="right")
+    stats_table.add_column("分数分布", justify="center")
     
-    for col in preview_cols:
-        preview_table.add_column(col, overflow="fold")
+    for flow in flow_list:
+        flow_rows = [r for r in eval_rows if r.get("flow") == flow]
+        if not flow_rows:
+            continue
+            
+        # 计算平均分
+        scores = [r.get("overall_score", 0) for r in flow_rows if isinstance(r.get("overall_score"), (int, float))]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        min_score = min(scores) if scores else 0
+        max_score = max(scores) if scores else 0
+        
+        # 计算分数分布
+        excellent = sum(1 for s in scores if s >= 8)
+        good = sum(1 for s in scores if 6 <= s < 8)
+        poor = sum(1 for s in scores if s < 6)
+        total = len(scores)
+        
+        # 计算must-have通过率
+        must_have_total = 0
+        must_have_passed = 0
+        for row in flow_rows:
+            must_have_cols = [col for col in row.keys() if col.startswith("must_have_") and col.endswith("__satisfied")]
+            for col in must_have_cols:
+                must_have_total += 1
+                if row.get(col) == True:
+                    must_have_passed += 1
+        
+        must_have_rate = f"{must_have_passed/must_have_total*100:.1f}%" if must_have_total > 0 else "N/A"
+        
+        # 颜色标记
+        if avg_score >= 8:
+            avg_score_str = f"[green]{avg_score:.1f}[/green]"
+        elif avg_score >= 6:
+            avg_score_str = f"[yellow]{avg_score:.1f}[/yellow]"
+        else:
+            avg_score_str = f"[red]{avg_score:.1f}[/red]"
+        
+        # 分数分布显示
+        distribution = f"优{excellent}/良{good}/差{poor}"
+        
+        stats_table.add_row(
+            flow,
+            str(total),
+            avg_score_str,
+            f"{min_score:.1f}-{max_score:.1f}",
+            must_have_rate,
+            distribution
+        )
+    
+    console.print(stats_table)
+
+
+def show_judge_stats_single(eval_rows: List[Dict[str, Any]]):
+    """显示单flow的judge统计"""
+    scores = [r.get("overall_score", 0) for r in eval_rows if isinstance(r.get("overall_score"), (int, float))]
+    if scores:
+        avg_score = sum(scores) / len(scores)
+        min_score = min(scores)
+        max_score = max(scores)
+        
+        # 计算分数分布
+        excellent = sum(1 for s in scores if s >= 8)
+        good = sum(1 for s in scores if 6 <= s < 8)
+        poor = sum(1 for s in scores if s < 6)
+        total = len(scores)
+        
+        # 计算Must-Have通过率
+        must_have_total = 0
+        must_have_passed = 0
+        for row in eval_rows:
+            must_have_cols = [col for col in row.keys() if col.startswith("must_have_") and col.endswith("__satisfied")]
+            for col in must_have_cols:
+                must_have_total += 1
+                if row.get(col) == True:
+                    must_have_passed += 1
+        
+        must_have_rate = f"{must_have_passed/must_have_total*100:.1f}%" if must_have_total > 0 else "N/A"
+        
+        console.print(f"[bold]总体统计[/]: 样本数 {total}, 平均分 {avg_score:.1f}, 范围 {min_score:.1f}-{max_score:.1f}")
+        console.print(f"[bold]分数分布[/]: 优秀(≥8分) {excellent}个, 良好(6-8分) {good}个, 待改进(<6分) {poor}个")
+        console.print(f"[bold]Must-Have通过率[/]: {must_have_rate} ({must_have_passed}/{must_have_total})")
+
+
+def show_compare_with_rules_preview(rows: List[Dict[str, Any]], flow_list: List[str], fieldnames: List[str]):
+    """显示多flow对比+规则评估预览"""
+    preview_table = Table(title="Compare Results with Rules Preview", show_lines=True)
+    preview_table.add_column("ID", style="bold")
+    
+    # 为每个flow添加输出和规则结果列
+    for flow in flow_list[:2]:  # 只显示前两个flow
+        preview_table.add_column(f"{flow}\nOutput", overflow="fold")
+        preview_table.add_column(f"{flow}\nRule", justify="center")
     
     for row in rows[:3]:
-        preview_row = []
-        for col in preview_cols:
-            value = str(row.get(col, ""))
-            if col.startswith("output"):
-                value = value[:100] + "..." if len(value) > 100 else value
-            preview_row.append(value)
+        preview_row = [str(row.get("id", ""))]
+        
+        for flow in flow_list[:2]:
+            # 输出预览
+            output = str(row.get(f"output__{flow}", ""))
+            output_preview = output[:60] + "..." if len(output) > 60 else output
+            preview_row.append(output_preview)
+            
+            # 规则结果
+            rule_pass = row.get(f"rule_pass__{flow}", 1)
+            if rule_pass == 1:
+                rule_status = "[green]✓[/green]"
+            else:
+                violations = row.get(f"rule_violations__{flow}", "")
+                rule_status = f"[red]✗[/red]\n{violations[:20]}..."
+            preview_row.append(rule_status)
+        
         preview_table.add_row(*preview_row)
     
     console.print(preview_table)
+    
+    # 显示规则统计
+    show_rules_stats_compare(rows, flow_list)
+
+
+def show_rules_stats_compare(rows: List[Dict[str, Any]], flow_list: List[str]):
+    """显示对比模式的规则统计"""
+    stats_table = Table(title="Rules Stats by Flow")
+    stats_table.add_column("Flow", style="bold")
+    stats_table.add_column("Pass Rate", justify="right")
+    stats_table.add_column("Failed Cases", justify="right")
+    stats_table.add_column("Top Violations", overflow="fold")
+    
+    for flow in flow_list:
+        total = len(rows)
+        passed = sum(1 for r in rows if r.get(f"rule_pass__{flow}", 1) == 1)
+        failed = total - passed
+        pass_rate = f"{passed/total*100:.1f}%" if total > 0 else "0%"
+        
+        # 统计违规类型
+        violation_counts = {}
+        for row in rows:
+            if row.get(f"rule_pass__{flow}", 1) == 0:
+                violations = row.get(f"rule_violations__{flow}", "").split(",")
+                for v in violations:
+                    v = v.strip()
+                    if v:
+                        violation_counts[v] = violation_counts.get(v, 0) + 1
+        
+        top_violations = sorted(violation_counts.items(), key=lambda x: x[1], reverse=True)[:2]
+        violation_str = ", ".join(f"{k}({v})" for k, v in top_violations)
+        
+        # 颜色标记
+        if passed == total:
+            pass_rate_str = f"[green]{pass_rate}[/green]"
+        elif failed > total * 0.5:
+            pass_rate_str = f"[red]{pass_rate}[/red]"
+        else:
+            pass_rate_str = f"[yellow]{pass_rate}[/yellow]"
+        
+        stats_table.add_row(flow, pass_rate_str, str(failed), violation_str)
+    
+    console.print(stats_table)
+
+
+def show_single_with_rules_preview(rows: List[Dict[str, Any]], fieldnames: List[str]):
+    """显示单flow+规则评估预览"""
+    preview_table = Table(title="Single Flow with Rules Preview", show_lines=True)
+    preview_table.add_column("ID", style="bold")
+    preview_table.add_column("Output", overflow="fold")
+    preview_table.add_column("Rule Status", justify="center")
+    preview_table.add_column("Violations", overflow="fold")
+    
+    for row in rows[:3]:
+        output = str(row.get("output", ""))
+        output_preview = output[:80] + "..." if len(output) > 80 else output
+        
+        rule_pass = row.get("rule_pass", 1)
+        if rule_pass == 1:
+            rule_status = "[green]✓ Pass[/green]"
+            violations = ""
+        else:
+            rule_status = "[red]✗ Fail[/red]"
+            violations = str(row.get("rule_violations", ""))[:40] + "..."
+        
+        preview_table.add_row(
+            str(row.get("id", "")),
+            output_preview,
+            rule_status,
+            violations
+        )
+    
+    console.print(preview_table)
+    
+    # 显示规则统计
+    total = len(rows)
+    passed = sum(1 for r in rows if r.get("rule_pass", 1) == 1)
+    failed = total - passed
+    pass_rate = f"{passed/total*100:.1f}%" if total > 0 else "0%"
+    
+    if passed == total:
+        status_str = f"[green]全部通过 ({pass_rate})[/green]"
+    elif failed > total * 0.5:
+        status_str = f"[red]大量失败 ({pass_rate} 通过)[/red]"
+    else:
+        status_str = f"[yellow]部分失败 ({pass_rate} 通过)[/yellow]"
+    
+    console.print(f"[bold]规则评估统计[/]: {status_str}, 失败 {failed} 条")
+
+
+def show_compare_preview(rows: List[Dict[str, Any]], flow_list: List[str], fieldnames: List[str]):
+    """显示多flow对比预览（无评估）"""
+    preview_table = Table(title="Compare Results Preview", show_lines=True)
+    preview_table.add_column("ID", style="bold")
+    
+    # 显示前两个flow的输出
+    for flow in flow_list[:2]:
+        preview_table.add_column(f"{flow}", overflow="fold")
+    
+    for row in rows[:3]:
+        preview_row = [str(row.get("id", ""))]
+        
+        for flow in flow_list[:2]:
+            output = str(row.get(f"output__{flow}", ""))
+            output_preview = output[:80] + "..." if len(output) > 80 else output
+            preview_row.append(output_preview)
+        
+        preview_table.add_row(*preview_row)
+    
+    console.print(preview_table)
+
+
+def show_single_preview(rows: List[Dict[str, Any]], fieldnames: List[str]):
+    """显示单flow预览（无评估）"""
+    preview_table = Table(title="Single Flow Results Preview", show_lines=True)
+    preview_table.add_column("ID", style="bold")
+    preview_table.add_column("Output", overflow="fold")
+    preview_table.add_column("Tokens", justify="right")
+    
+    for row in rows[:3]:
+        output = str(row.get("output", ""))
+        output_preview = output[:100] + "..." if len(output) > 100 else output
+        tokens = str(row.get("total_tokens", ""))
+        
+        preview_table.add_row(
+            str(row.get("id", "")),
+            output_preview,
+            tokens
+        )
+    
+    console.print(preview_table)
+
+
+def apply_rules_to_outputs(agent_cfg, rows: List[Dict[str, Any]], flow_list: List[str]) -> List[Dict[str, Any]]:
+    """对输出应用规则评估"""
+    from .rule_engine import apply_rules as apply_rules_engine
+    
+    eval_cfg = agent_cfg.evaluation or {}
+    rules = eval_cfg.get("rules", []) or []
+    
+    if not rules:
+        return rows
+    
+    for row in rows:
+        if len(flow_list) == 1:
+            # 单flow模式
+            output_text = (row.get("output") or "").strip()
+            rule_result = apply_rules_engine(rules, output_text)
+            row.update(rule_result)
+        else:
+            # 多flow对比模式，为每个flow分别评估
+            for flow_name in flow_list:
+                output_text = (row.get(f"output__{flow_name}") or "").strip()
+                rule_result = apply_rules_engine(rules, output_text)
+                row[f"rule_pass__{flow_name}"] = rule_result["rule_pass"]
+                row[f"rule_violations__{flow_name}"] = rule_result["rule_violations"]
+    
+    return rows
+
+
+def print_rule_stats(rows: List[Dict[str, Any]], flow_list: List[str], console):
+    """打印规则评估统计"""
+    if len(flow_list) == 1:
+        # 单flow统计
+        total = len(rows)
+        passed = sum(1 for r in rows if r.get("rule_pass", 1) == 1)
+        failed = total - passed
+        pass_rate = f"{passed/total*100:.1f}%" if total > 0 else "0%"
+        
+        if passed == total:
+            status_str = f"[green]全部通过 ({pass_rate})[/green]"
+        elif failed > total * 0.5:
+            status_str = f"[red]大量失败 ({pass_rate} 通过)[/red]"
+        else:
+            status_str = f"[yellow]部分失败 ({pass_rate} 通过)[/yellow]"
+        
+        console.print(f"[bold]规则评估统计[/]: {status_str}, 失败 {failed} 条")
+        
+        # 显示违规统计
+        if failed > 0:
+            violation_counts = {}
+            for row in rows:
+                if row.get("rule_pass", 1) == 0:
+                    violations = row.get("rule_violations", "").split(",")
+                    for v in violations:
+                        v = v.strip()
+                        if v:
+                            violation_counts[v] = violation_counts.get(v, 0) + 1
+            
+            if violation_counts:
+                console.print("[bold]违规类型统计：[/]")
+                for rule_id, count in sorted(violation_counts.items(), key=lambda x: x[1], reverse=True):
+                    console.print(f"  {rule_id}: {count} 次")
+    else:
+        # 多flow对比统计
+        stats_table = Table(title="Rules Stats by Flow")
+        stats_table.add_column("Flow", style="bold")
+        stats_table.add_column("Pass Rate", justify="right")
+        stats_table.add_column("Failed", justify="right")
+        stats_table.add_column("Top Violations", overflow="fold")
+        
+        for flow in flow_list:
+            total = len(rows)
+            passed = sum(1 for r in rows if r.get(f"rule_pass__{flow}", 1) == 1)
+            failed = total - passed
+            pass_rate = f"{passed/total*100:.1f}%" if total > 0 else "0%"
+            
+            # 统计违规类型
+            violation_counts = {}
+            for row in rows:
+                if row.get(f"rule_pass__{flow}", 1) == 0:
+                    violations = row.get(f"rule_violations__{flow}", "").split(",")
+                    for v in violations:
+                        v = v.strip()
+                        if v:
+                            violation_counts[v] = violation_counts.get(v, 0) + 1
+            
+            top_violations = sorted(violation_counts.items(), key=lambda x: x[1], reverse=True)[:2]
+            violation_str = ", ".join(f"{k}({v})" for k, v in top_violations)
+            
+            # 颜色标记
+            if passed == total:
+                pass_rate_str = f"[green]{pass_rate}[/green]"
+            elif failed > total * 0.5:
+                pass_rate_str = f"[red]{pass_rate}[/red]"
+            else:
+                pass_rate_str = f"[yellow]{pass_rate}[/yellow]"
+            
+            stats_table.add_row(flow, pass_rate_str, str(failed), violation_str)
+        
+        console.print(stats_table)
 
 
 if __name__ == "__main__":

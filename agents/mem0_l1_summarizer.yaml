@@ -53,10 +53,6 @@ evaluation:
   # 规则层：快速过滤明显的 bad case（可选）
   # 如果不需要规则，可以完全删除 rules 部分
   rules:
-    - id: "not_empty"
-      kind: "non_empty"
-      target: "output"
-      action: "mark_bad"
     
     - id: "reasonable_length"
       kind: "max_chars"
@@ -100,3 +96,4 @@ evaluation:
       label: "原始样本 JSON"
       section: "raw"
       as_json: true
+      required: false

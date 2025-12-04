@@ -12,7 +12,11 @@ from rich.console import Console
 from rich.table import Table
 
 from .chains import run_flow_with_tokens
-from .paths import DATA_DIR
+from .paths import (
+    DATA_DIR, agent_testset_dir, agent_runs_dir, agent_evals_dir,
+    default_compare_outfile, default_batch_outfile, ensure_agent_dirs,
+    timestamp_str
+)
 from .agent_registry import load_agent, list_available_agents
 from .eval_llm_judge import build_judge_chain, judge_one
 from .rule_engine import apply_rules as apply_rules_engine
@@ -33,23 +37,20 @@ def load_test_cases(path: Path) -> List[Dict[str, Any]]:
     return cases
 
 
-def generate_output_filename(agent_id: str, flows: List[str], with_rules: bool, with_judge: bool) -> str:
-    """生成输出文件名"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+def generate_output_filename(agent_id: str, flows: List[str], with_rules: bool, with_judge: bool) -> Path:
+    """生成输出文件路径"""
+    ts = timestamp_str()
+    
     if len(flows) == 1:
+        # 单flow模式
         flow_part = flows[0]
+        filename = f"{ts}_batch_{flow_part}.csv"
     else:
-        flow_part = "compare"
+        # 多flow对比模式
+        flows_str = "_".join(flows)
+        filename = f"{ts}_compare_{flows_str}.csv"
     
-    # 根据评估类型确定后缀
-    if with_judge:
-        suffix = "eval"
-    elif with_rules:
-        suffix = "rules"
-    else:
-        suffix = "results"
-    
-    return f"{agent_id}_{flow_part}.{suffix}.{timestamp}.csv"
+    return agent_runs_dir(agent_id) / filename
 
 
 def apply_rules_to_outputs(agent_cfg, rows: List[Dict[str, Any]], flow_list: List[str]) -> List[Dict[str, Any]]:
@@ -223,22 +224,33 @@ def run_eval(
         console.print("[red]错误：没有可执行的flow。[/]")
         raise typer.Exit(1)
 
+    # 确保agent目录存在
+    ensure_agent_dirs(agent_cfg.id)
+    
     # 解析测试集
     if not infile:
         infile = agent_cfg.default_testset
+        in_path = agent_testset_dir(agent_cfg.id) / infile
         console.print(f"[bold]Testset[/]: {infile} (使用agent默认测试集)")
     else:
+        # 如果是绝对路径，直接使用；否则在testset目录下查找
+        if Path(infile).is_absolute():
+            in_path = Path(infile)
+        else:
+            in_path = agent_testset_dir(agent_cfg.id) / infile
         console.print(f"[bold]Testset[/]: {infile}")
 
-    # 生成输出文件名
+    # 生成输出文件路径
     if not outfile:
-        outfile = generate_output_filename(agent_cfg.id, flow_list, rules, judge)
-        console.print(f"[bold]Output[/]: {outfile} (自动生成)")
+        out_path = generate_output_filename(agent_cfg.id, flow_list, rules, judge)
+        console.print(f"[bold]Output[/]: {out_path.name} (自动生成)")
     else:
+        # 如果是绝对路径，直接使用；否则在runs目录下
+        if Path(outfile).is_absolute():
+            out_path = Path(outfile)
+        else:
+            out_path = agent_runs_dir(agent_cfg.id) / outfile
         console.print(f"[bold]Output[/]: {outfile}")
-
-    in_path = DATA_DIR / infile
-    out_path = DATA_DIR / outfile
 
     # 检查输入文件
     if not in_path.exists():
@@ -486,8 +498,7 @@ def run_eval(
 
         if eval_rows:
             # 保存judge结果到新文件
-            eval_outfile = outfile.replace(".csv", ".judge.csv")
-            eval_out_path = DATA_DIR / eval_outfile
+            eval_out_path = agent_evals_dir(agent_cfg.id) / "llm" / f"{out_path.stem}.judge.csv"
             
             eval_fieldnames = sorted(eval_rows[0].keys(), key=lambda x: (x not in ["id", "flow"], x))
             with open(eval_out_path, "w", newline="", encoding="utf-8") as f:

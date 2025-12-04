@@ -11,7 +11,10 @@ from rich.console import Console
 from rich.table import Table
 
 from .chains import run_flow_with_tokens
-from .paths import DATA_DIR
+from .paths import (
+    DATA_DIR, agent_testset_dir, agent_runs_dir,
+    default_batch_outfile, ensure_agent_dirs
+)
 from .agent_registry import load_agent, list_available_agents
 
 console = Console()
@@ -46,6 +49,7 @@ def run(
     if agent:
         try:
             agent_cfg = load_agent(agent)
+            ensure_agent_dirs(agent_cfg.id)
             console.rule("[bold blue]Prompt Lab · Batch Run")
             console.print(f"[bold]Agent[/]: {agent_cfg.id} - {agent_cfg.name}")
             console.print(f"[dim]{agent_cfg.description}[/]")
@@ -73,15 +77,29 @@ def run(
     if not infile:
         if agent_cfg:
             infile = agent_cfg.default_testset
+            in_path = agent_testset_dir(agent_cfg.id) / infile
             console.print(f"[bold]Testset[/]: {infile} (使用 agent 默认测试集)")
         else:
             console.print("[red]错误：必须指定 --infile，或者使用 --agent。[/]")
             raise typer.Exit(1)
     else:
+        if agent_cfg and not Path(infile).is_absolute():
+            in_path = agent_testset_dir(agent_cfg.id) / infile
+        else:
+            in_path = DATA_DIR / infile
         console.print(f"[bold]Testset[/]: {infile}")
 
-    in_path = DATA_DIR / infile
-    out_path = DATA_DIR / outfile
+    # 解析输出路径
+    if agent_cfg and outfile == "results.demo.csv":
+        # 使用默认路径
+        out_path = default_batch_outfile(agent_cfg.id, flow)
+        console.print(f"[bold]Output[/]: {out_path.name} (自动生成)")
+    elif agent_cfg and not Path(outfile).is_absolute():
+        out_path = agent_runs_dir(agent_cfg.id) / outfile
+        console.print(f"[bold]Output[/]: {outfile}")
+    else:
+        out_path = DATA_DIR / outfile
+        console.print(f"[bold]Output[/]: {outfile}")
 
     console.print(f"[bold]Input file[/]: {in_path}")
     console.print(f"[bold]Output file[/]: {out_path}")

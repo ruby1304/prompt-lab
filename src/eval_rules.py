@@ -14,9 +14,9 @@ from rich.table import Table
 
 from .agent_registry import load_agent
 from .rule_engine import apply_rules as apply_rules_engine, get_supported_rule_types, validate_rule
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
+from .paths import (
+    DATA_DIR, agent_runs_dir, agent_evals_dir, ensure_agent_dirs
+)
 
 app = typer.Typer()
 console = Console()
@@ -41,19 +41,33 @@ def apply_rules_to_row(agent_cfg, row: Dict[str, Any], output_field: str = "outp
 @app.command()
 def run(
     agent: str = typer.Option(..., help="agent id"),
-    infile: str = typer.Option(..., help="输入结果文件，如 mem0_l1.compare.csv"),
-    outfile: str = typer.Option("with_rules.csv", help="输出带规则结果的文件"),
+    infile: str = typer.Option(..., help="输入结果文件，如 2025-12-04T10-30_compare_v1_v2.csv"),
+    outfile: str = typer.Option("", help="输出带规则结果的文件；为空则自动生成"),
     mode: str = typer.Option("compare", help="处理模式：compare（对比结果）或 manual（人工评审表）"),
 ):
     """对结果文件应用规则评估"""
     try:
         agent_cfg = load_agent(agent)
+        ensure_agent_dirs(agent_cfg.id)
     except FileNotFoundError:
         console.print(f"[red]Agent 不存在: {agent}[/]")
         raise typer.Exit(1)
     
-    in_path = DATA_DIR / infile
-    out_path = DATA_DIR / outfile
+    # 解析输入路径
+    if Path(infile).is_absolute():
+        in_path = Path(infile)
+    else:
+        in_path = agent_runs_dir(agent_cfg.id) / infile
+    
+    # 解析输出路径
+    if not outfile:
+        # 自动生成输出文件名
+        base_name = in_path.stem
+        out_path = agent_evals_dir(agent_cfg.id) / "rules" / f"{base_name}.rules.csv"
+    elif Path(outfile).is_absolute():
+        out_path = Path(outfile)
+    else:
+        out_path = agent_evals_dir(agent_cfg.id) / "rules" / outfile
 
     console.print(f"[bold]Agent[/]: {agent_cfg.id} - {agent_cfg.name}")
     console.print(f"[bold]Input[/]: {in_path}")
@@ -205,10 +219,21 @@ def run(
 
 @app.command()
 def stats(
-    infile: str = typer.Option(..., help="带规则结果的文件，如 mem0_l1.with_rules.csv"),
+    agent: str = typer.Option(..., help="agent id"),
+    infile: str = typer.Option(..., help="带规则结果的文件，如 xxx.rules.csv"),
 ):
     """统计规则评估结果"""
-    in_path = DATA_DIR / infile
+    try:
+        agent_cfg = load_agent(agent)
+    except FileNotFoundError:
+        console.print(f"[red]Agent 不存在: {agent}[/]")
+        raise typer.Exit(1)
+    
+    # 解析输入路径
+    if Path(infile).is_absolute():
+        in_path = Path(infile)
+    else:
+        in_path = agent_evals_dir(agent_cfg.id) / "rules" / infile
     
     if not in_path.exists():
         console.print(f"[red]文件不存在: {in_path}[/]")

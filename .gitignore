@@ -3,3 +3,11 @@ __pycache__/
 .venv/
 .env
 outputs/
+
+# 运行产生的中间结果
+data/runs/
+data/evals/
+
+# 临时文件
+*.tmp.csv
+*.log

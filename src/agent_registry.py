@@ -9,6 +9,7 @@ import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 AGENT_DIR = ROOT_DIR / "agents"
+PROMPT_DIR = ROOT_DIR / "prompts"  # 保留全局prompts目录
 
 
 @dataclass
@@ -44,9 +45,17 @@ class AgentConfig:
 
 def load_agent(agent_id: str) -> AgentConfig:
     """加载指定 agent 的配置"""
-    path = AGENT_DIR / f"{agent_id}.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"Agent config not found: {path}")
+    # 优先尝试新结构：agents/{agent_id}/agent.yaml
+    new_path = AGENT_DIR / agent_id / "agent.yaml"
+    # 兼容旧结构：agents/{agent_id}.yaml
+    old_path = AGENT_DIR / f"{agent_id}.yaml"
+    
+    if new_path.exists():
+        path = new_path
+    elif old_path.exists():
+        path = old_path
+    else:
+        raise FileNotFoundError(f"Agent config not found: {new_path} or {old_path}")
     
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -82,10 +91,51 @@ def list_available_agents() -> List[str]:
         return []
     
     agent_ids = []
+    
+    # 新结构：agents/{agent_id}/agent.yaml
+    for agent_dir in AGENT_DIR.iterdir():
+        if (agent_dir.is_dir() and 
+            (agent_dir / "agent.yaml").exists() and 
+            not agent_dir.name.startswith("_")):  # 排除模板目录
+            agent_ids.append(agent_dir.name)
+    
+    # 兼容旧结构：agents/{agent_id}.yaml
     for yaml_file in AGENT_DIR.glob("*.yaml"):
-        agent_ids.append(yaml_file.stem)
+        if yaml_file.stem not in agent_ids:  # 避免重复
+            agent_ids.append(yaml_file.stem)
     
     return sorted(agent_ids)
+
+
+def find_prompt_file(agent_id: str, flow_file: str) -> Path:
+    """查找prompt文件，支持新旧结构"""
+    # 优先在agent目录下查找
+    agent_prompt_path = AGENT_DIR / agent_id / "prompts" / flow_file
+    if agent_prompt_path.exists():
+        return agent_prompt_path
+    
+    # 兼容全局prompts目录
+    global_prompt_path = PROMPT_DIR / flow_file
+    if global_prompt_path.exists():
+        return global_prompt_path
+    
+    raise FileNotFoundError(f"Prompt file not found: {flow_file} (searched in {agent_prompt_path} and {global_prompt_path})")
+
+
+def find_testset_file(agent_id: str, testset_file: str) -> Path:
+    """查找测试集文件，支持新旧结构"""
+    # 优先在agent目录下查找
+    agent_testset_path = AGENT_DIR / agent_id / "testsets" / testset_file
+    if agent_testset_path.exists():
+        return agent_testset_path
+    
+    # 兼容data/testsets目录
+    from .paths import agent_testset_dir
+    old_testset_path = agent_testset_dir(agent_id) / testset_file
+    if old_testset_path.exists():
+        return old_testset_path
+    
+    raise FileNotFoundError(f"Testset file not found: {testset_file} (searched in {agent_testset_path} and {old_testset_path})")
 
 
 def get_agent_summary(agent_id: str) -> str:

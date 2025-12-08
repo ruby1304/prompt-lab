@@ -4,10 +4,20 @@ __pycache__/
 .env
 outputs/
 
-# 运行产生的中间结果
+# 运行产生的中间结果（不进Git）
 data/runs/
 data/evals/
+
+# 兼容旧结构的测试集目录（已迁移到agents/*/testsets/）
+data/testsets/
 
 # 临时文件
 *.tmp.csv
 *.log
+
+# IDE和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

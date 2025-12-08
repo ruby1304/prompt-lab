@@ -1,0 +1,3 @@
+{"id": "test_001", "input": "测试输入1", "expected": "期望的输出结果"}
+{"id": "test_002", "input": "测试输入2", "expected": "期望的输出结果"}
+{"id": "test_003", "input": "测试输入3", "expected": "期望的输出结果"}

@@ -13,8 +13,13 @@ PROMPT_DIR = ROOT_DIR / "prompts"
 
 
 def agent_testset_dir(agent_id: str) -> Path:
-    """获取agent的测试集目录"""
+    """获取agent的测试集目录（兼容旧结构）"""
     return DATA_DIR / "testsets" / agent_id
+
+
+def agent_source_testset_dir(agent_id: str) -> Path:
+    """获取agent源码目录下的测试集目录（新结构）"""
+    return ROOT_DIR / "agents" / agent_id / "testsets"
 
 
 def agent_runs_dir(agent_id: str) -> Path:

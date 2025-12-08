@@ -157,7 +157,8 @@ def compare(
         # 依次跑每个 flow
         for flow_name in flow_list:
             console.print(f"  -> Running flow: [cyan]{flow_name}[/cyan]")
-            output, token_info = run_flow_with_tokens(flow_name, extra_vars=variables)
+            agent_id = agent_cfg.id if agent_cfg else None
+            output, token_info = run_flow_with_tokens(flow_name, extra_vars=variables, agent_id=agent_id)
             
             # 保存输出和token信息
             col_name = f"output__{flow_name}"

@@ -13,11 +13,23 @@ from .config import get_openai_model_name, get_openai_temperature
 from .paths import PROMPT_DIR
 
 
-def load_flow_config(flow_name: str) -> Dict[str, Any]:
-    """从 prompts 目录加载 YAML 配置"""
-    path = PROMPT_DIR / f"{flow_name}.yaml"
+def load_flow_config(flow_name: str, agent_id: str = None) -> Dict[str, Any]:
+    """加载 YAML 配置，支持新旧结构"""
+    if agent_id:
+        # 如果提供了agent_id，使用新的查找逻辑
+        from .agent_registry import find_prompt_file
+        try:
+            path = find_prompt_file(agent_id, f"{flow_name}.yaml")
+        except FileNotFoundError:
+            # 如果在agent目录找不到，尝试全局目录
+            path = PROMPT_DIR / f"{flow_name}.yaml"
+    else:
+        # 兼容旧的直接调用方式
+        path = PROMPT_DIR / f"{flow_name}.yaml"
+    
     if not path.exists():
         raise FileNotFoundError(f"Prompt config not found: {path}")
+    
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -74,6 +86,7 @@ def run_flow(
     input_text: str = "",
     context: str = "",
     extra_vars: Dict[str, Any] | None = None,
+    agent_id: str = None,
 ) -> str:
     """
     对外暴露的核心接口：
@@ -85,7 +98,7 @@ def run_flow(
     缺失值依次使用 defaults 或空字符串兜底。
     """
 
-    flow_cfg = load_flow_config(flow_name)
+    flow_cfg = load_flow_config(flow_name, agent_id)
     prompt = build_prompt(flow_cfg)
     chain = build_chain(prompt, flow_cfg)
 
@@ -113,13 +126,14 @@ def run_flow_with_tokens(
     input_text: str = "",
     context: str = "",
     extra_vars: Dict[str, Any] | None = None,
+    agent_id: str = None,
 ) -> Tuple[str, Dict[str, int]]:
     """
     带token统计的flow运行接口
     返回: (输出内容, token统计信息)
     """
     
-    flow_cfg = load_flow_config(flow_name)
+    flow_cfg = load_flow_config(flow_name, agent_id)
     prompt = build_prompt(flow_cfg)
     
     # 使用with_config来启用token统计

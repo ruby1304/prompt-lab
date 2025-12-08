@@ -19,16 +19,35 @@ Agent 配置统一管理：
 
 ```
 prompt-lab/
-├── agents/                    # Agent 配置文件
-│   ├── mem0_l1_summarizer.yaml
-│   └── asr_cleaner.yaml
-├── prompts/                   # Prompt Flow 配置（YAML）
-│   ├── mem0_l1_v1.yaml
-│   ├── mem0_l1_v2.yaml
-│   └── mem0_l1_v3.yaml
-├── data/                      # 测试数据和结果
-│   ├── mem0_l1.jsonl
-│   └── *.eval.csv
+├── agents/                    # Agent 配置和资源（按Agent分组）
+│   ├── mem0_l1_summarizer/    # 对话记忆总结助手
+│   │   ├── agent.yaml         # Agent配置
+│   │   ├── prompts/           # 提示词版本
+│   │   │   ├── mem0_l1_v1.yaml
+│   │   │   ├── mem0_l1_v2.yaml
+│   │   │   └── mem0_l1_v3.yaml
+│   │   └── testsets/          # 测试集
+│   │       └── mem0_l1.jsonl
+│   ├── asr_cleaner/           # ASR纠错助手
+│   │   ├── agent.yaml
+│   │   ├── prompts/
+│   │   └── testsets/
+│   ├── judge_default/         # 通用评估Agent
+│   │   ├── agent.yaml
+│   │   └── prompts/
+│   │       ├── judge_v1.yaml
+│   │       └── judge_v2.yaml
+│   └── _template/             # 新Agent创建模板
+├── prompts/                   # 全局通用提示词（可选）
+│   ├── analysis_agent.yaml
+│   └── flow_demo.yaml
+├── data/                      # 运行时数据（不进Git）
+│   ├── runs/                  # 执行结果
+│   │   ├── mem0_l1_summarizer/
+│   │   └── asr_cleaner/
+│   └── evals/                 # 评估结果
+│       ├── mem0_l1_summarizer/
+│       └── asr_cleaner/
 ├── scripts/                   # 辅助脚本
 │   └── quick_eval.sh
 └── src/                       # 核心脚本与工具
@@ -70,6 +89,22 @@ python -m src agents list
 #### 查看特定 Agent 详情
 ```bash
 python -m src agents show mem0_l1_summarizer
+```
+
+#### 创建新 Agent
+```bash
+# 1. 复制模板
+cp -r agents/_template agents/your_new_agent
+
+# 2. 编辑配置
+cd agents/your_new_agent
+# 修改 agent.yaml 中的 id、name、description 等
+# 修改 prompts/your_agent_v1.yaml 中的提示词
+# 修改 testsets/default.jsonl 中的测试用例
+
+# 3. 测试新 Agent
+python -m src agents show your_new_agent
+python -m src eval --agent your_new_agent --limit 3
 ```
 
 ### 统一评估命令（推荐）
@@ -162,7 +197,7 @@ python -m src.summarize_manual_review summary --infile manual_review.csv
 
 ### Agent 配置
 
-在 `agents/*.yaml` 中定义业务 Agent：
+在 `agents/{agent_id}/agent.yaml` 中定义业务 Agent：
 
 ```yaml
 id: "mem0_l1_summarizer"
@@ -230,7 +265,7 @@ evaluation:
 
 ### Prompt Flow 配置
 
-在 `prompts/*.yaml` 中定义具体的提示词：
+在 `agents/{agent_id}/prompts/*.yaml` 中定义具体的提示词：
 
 ```yaml
 name: "my_flow"
@@ -307,13 +342,17 @@ defaults:
 ## 🏆 Agent 系统的优势
 
 1. **业务导向**：每个 Agent 对应一个明确的业务角色和任务
-2. **统一管理**：业务需求、测试集、提示词版本都在一个配置文件里
+2. **统一管理**：业务需求、测试集、提示词版本都在一个目录里
 3. **标准化评估**：预定义评估标准和权重，便于自动化评估
 4. **版本追踪**：清楚知道每个 flow 的作用和改进方向
 5. **简化使用**：一个命令就能跑完整的测试流程
+6. **模板化创建**：使用 `agents/_template` 快速创建新Agent
+7. **物理聚合**：相关文件都在同一目录下，便于维护
 
 ## 📚 详细文档
 
+- [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) - 项目结构详细说明
+- [DATA_STRUCTURE_GUIDE.md](DATA_STRUCTURE_GUIDE.md) - 数据目录结构指南
 - [EVALUATION_RULES.md](EVALUATION_RULES.md) - 完整的规则类型说明
 - [RULES_QUICK_REFERENCE.md](RULES_QUICK_REFERENCE.md) - 规则系统快速参考
 - [MANUAL_EVAL_GUIDE.md](MANUAL_EVAL_GUIDE.md) - 人工评估系统详细指南

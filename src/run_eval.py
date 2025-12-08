@@ -230,15 +230,24 @@ def run_eval(
     # 解析测试集
     if not infile:
         infile = agent_cfg.default_testset
-        in_path = agent_testset_dir(agent_cfg.id) / infile
         console.print(f"[bold]Testset[/]: {infile} (使用agent默认测试集)")
     else:
-        # 如果是绝对路径，直接使用；否则在testset目录下查找
-        if Path(infile).is_absolute():
-            in_path = Path(infile)
-        else:
-            in_path = agent_testset_dir(agent_cfg.id) / infile
         console.print(f"[bold]Testset[/]: {infile}")
+    
+    # 使用新的文件查找逻辑
+    try:
+        from .agent_registry import find_testset_file
+        in_path = find_testset_file(agent_cfg.id, infile)
+    except FileNotFoundError as e:
+        console.print(f"[red]错误：测试文件不存在： \n{e}[/]")
+        # 显示可用的测试集
+        from .paths import agent_source_testset_dir
+        testset_dir = agent_source_testset_dir(agent_cfg.id)
+        if testset_dir.exists():
+            available_testsets = [f.name for f in testset_dir.glob("*.jsonl")]
+            if available_testsets:
+                console.print(f"[yellow]提示：agent '{agent_cfg.id}' 的可用测试集：{', '.join(available_testsets)}[/]")
+        raise typer.Exit(1)
 
     # 生成输出文件路径
     if not outfile:
@@ -303,7 +312,7 @@ def run_eval(
         # 执行每个flow
         for flow_name in flow_list:
             console.print(f"  -> Running flow: [cyan]{flow_name}[/cyan]")
-            output, token_info = run_flow_with_tokens(flow_name, extra_vars=variables)
+            output, token_info = run_flow_with_tokens(flow_name, extra_vars=variables, agent_id=agent_cfg.id)
             
             # 保存结果
             if len(flow_list) == 1:

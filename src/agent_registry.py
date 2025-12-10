@@ -35,12 +35,25 @@ class AgentConfig:
     type: str = "task"           # "task" or "judge"
     model: str | None = None     # 对 judge agent 有用
     temperature: float | None = None
+    baseline_flow: str | None = None  # 用于回归测试的基线 flow
 
     @property
     def all_testsets(self) -> List[str]:
         if not self.default_testset:
             return self.extra_testsets or []
         return [self.default_testset] + list(self.extra_testsets or [])
+    
+    def validate(self) -> List[str]:
+        """验证 agent 配置的有效性"""
+        errors = []
+        
+        # 验证 baseline_flow 引用
+        if self.baseline_flow:
+            flow_names = {flow.name for flow in self.flows}
+            if self.baseline_flow not in flow_names:
+                errors.append(f"baseline_flow '{self.baseline_flow}' 不存在于 flows 列表中")
+        
+        return errors
 
 
 def load_agent(agent_id: str) -> AgentConfig:
@@ -69,7 +82,7 @@ def load_agent(agent_id: str) -> AgentConfig:
         for f in cfg.get("flows", [])
     ]
 
-    return AgentConfig(
+    agent_config = AgentConfig(
         id=cfg["id"],
         name=cfg.get("name", cfg["id"]),
         description=cfg.get("description", ""),
@@ -82,7 +95,15 @@ def load_agent(agent_id: str) -> AgentConfig:
         type=cfg.get("type", "task"),
         model=cfg.get("model"),
         temperature=cfg.get("temperature"),
+        baseline_flow=cfg.get("baseline_flow"),
     )
+    
+    # 验证配置
+    validation_errors = agent_config.validate()
+    if validation_errors:
+        raise ValueError(f"Agent '{cfg['id']}' 配置验证失败:\n" + "\n".join(f"- {error}" for error in validation_errors))
+    
+    return agent_config
 
 
 def list_available_agents() -> List[str]:
@@ -124,18 +145,25 @@ def find_prompt_file(agent_id: str, flow_file: str) -> Path:
 
 def find_testset_file(agent_id: str, testset_file: str) -> Path:
     """查找测试集文件，支持新旧结构"""
-    # 优先在agent目录下查找
-    agent_testset_path = AGENT_DIR / agent_id / "testsets" / testset_file
-    if agent_testset_path.exists():
-        return agent_testset_path
+    from .compatibility import get_compatible_path
     
-    # 兼容data/testsets目录
-    from .paths import agent_testset_dir
-    old_testset_path = agent_testset_dir(agent_id) / testset_file
-    if old_testset_path.exists():
-        return old_testset_path
-    
-    raise FileNotFoundError(f"Testset file not found: {testset_file} (searched in {agent_testset_path} and {old_testset_path})")
+    # 使用兼容性路径解析器
+    try:
+        return get_compatible_path("testset", agent_id, testset_file)
+    except Exception:
+        # 如果兼容性解析失败，回退到原始逻辑
+        # 优先在agent目录下查找
+        agent_testset_path = AGENT_DIR / agent_id / "testsets" / testset_file
+        if agent_testset_path.exists():
+            return agent_testset_path
+        
+        # 兼容data/testsets目录
+        from .paths import agent_testset_dir
+        old_testset_path = agent_testset_dir(agent_id) / testset_file
+        if old_testset_path.exists():
+            return old_testset_path
+        
+        raise FileNotFoundError(f"Testset file not found: {testset_file} (searched in {agent_testset_path} and {old_testset_path})")
 
 
 def get_agent_summary(agent_id: str) -> str:

@@ -48,11 +48,14 @@ def build_prompt(flow_cfg: Mapping[str, Any]) -> ChatPromptTemplate:
     )
 
 
-def build_chain(prompt: ChatPromptTemplate, flow_cfg: Mapping[str, Any]) -> RunnableSerializable:
+def build_chain(prompt: ChatPromptTemplate, flow_cfg: Mapping[str, Any], model_override: str = None) -> RunnableSerializable:
     """根据 Prompt 构建一个 LCEL Chain，并允许配置模型参数。"""
 
+    # 支持模型覆盖，优先级：model_override > flow_cfg.model > 全局默认
+    model_name = model_override or flow_cfg.get("model", get_openai_model_name())
+    
     llm = ChatOpenAI(
-        model=flow_cfg.get("model", get_openai_model_name()),
+        model=model_name,
         temperature=flow_cfg.get("temperature", get_openai_temperature()),
     )
 
@@ -100,7 +103,13 @@ def run_flow(
 
     flow_cfg = load_flow_config(flow_name, agent_id)
     prompt = build_prompt(flow_cfg)
-    chain = build_chain(prompt, flow_cfg)
+    
+    # 检查是否有模型覆盖
+    model_override = None
+    if extra_vars and "_model_override" in extra_vars:
+        model_override = extra_vars.pop("_model_override")
+    
+    chain = build_chain(prompt, flow_cfg, model_override)
 
     provided_vars: Dict[str, Any] = {}
     if extra_vars:
@@ -136,9 +145,16 @@ def run_flow_with_tokens(
     flow_cfg = load_flow_config(flow_name, agent_id)
     prompt = build_prompt(flow_cfg)
     
-    # 使用with_config来启用token统计
+    # 检查是否有模型覆盖
+    model_override = None
+    if extra_vars and "_model_override" in extra_vars:
+        model_override = extra_vars.pop("_model_override")
+    
+    # 支持模型覆盖
+    model_name = model_override or flow_cfg.get("model", get_openai_model_name())
+    
     llm = ChatOpenAI(
-        model=flow_cfg.get("model", get_openai_model_name()),
+        model=model_name,
         temperature=flow_cfg.get("temperature", get_openai_temperature()),
     )
     

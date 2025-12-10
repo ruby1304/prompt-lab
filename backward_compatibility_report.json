@@ -1,0 +1,91 @@
+{
+  "timestamp": "1765268508.0798006",
+  "summary": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0,
+    "pass_rate": 1.0
+  },
+  "results": [
+    {
+      "test": "load_agent_asr_cleaner",
+      "success": true,
+      "details": "flows: ['asr_clean_v1', 'asr_clean_v2']"
+    },
+    {
+      "test": "load_agent_judge_default",
+      "success": true,
+      "details": "flows: ['judge_v1', 'judge_v2']"
+    },
+    {
+      "test": "load_agent_mem0_l1_summarizer",
+      "success": true,
+      "details": "flows: ['mem0_l1_v1', 'mem0_l1_v2', 'mem0_l1_v3']"
+    },
+    {
+      "test": "main_help",
+      "success": true,
+      "details": "主命令帮助"
+    },
+    {
+      "test": "batch_help",
+      "success": true,
+      "details": "batch 命令帮助"
+    },
+    {
+      "test": "compare_help",
+      "success": true,
+      "details": "compare 命令帮助"
+    },
+    {
+      "test": "eval_help",
+      "success": true,
+      "details": "eval 命令帮助"
+    },
+    {
+      "test": "baseline_help",
+      "success": true,
+      "details": "baseline 命令帮助"
+    },
+    {
+      "test": "regression_help",
+      "success": true,
+      "details": "regression 命令帮助"
+    },
+    {
+      "test": "data_file_access_high_score_cases.csv",
+      "success": true,
+      "details": "CSV 文件，4 行"
+    },
+    {
+      "test": "data_file_access_test_new_eval.csv",
+      "success": true,
+      "details": "CSV 文件，4 行"
+    },
+    {
+      "test": "data_file_access_results.demo.csv",
+      "success": true,
+      "details": "CSV 文件，5 行"
+    },
+    {
+      "test": "data_file_access_mem0_l1_summarizer_mem0_l1_v3.eval.20251203_200908.judge.csv",
+      "success": true,
+      "details": "CSV 文件，3 行"
+    },
+    {
+      "test": "data_file_access_mem0_l1_summarizer_compare.eval.20251204_104524.judge.csv",
+      "success": true,
+      "details": "CSV 文件，5 行"
+    },
+    {
+      "test": "tag_filtering_include",
+      "success": true,
+      "details": "期望: {'3', '1'}, 实际: {'3', '1'}"
+    },
+    {
+      "test": "tag_filtering_exclude",
+      "success": true,
+      "details": "期望: {'3', '4', '1'}, 实际: {'3', '4', '1'}"
+    }
+  ]
+}

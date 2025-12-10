@@ -1,0 +1,61 @@
+{
+  "checkpoint_id": "demo_pipeline_test_variant_20251209_161922",
+  "pipeline_id": "demo_pipeline",
+  "variant": "test_variant",
+  "status": "completed",
+  "created_at": "2025-12-09T16:19:22.058917",
+  "updated_at": "2025-12-09T16:19:23.267571",
+  "total_samples": 3,
+  "completed_samples": 3,
+  "failed_samples": 0,
+  "sample_hashes": [
+    "084de0c5033278b19c97c1dd0dc21ba7",
+    "0ef78f69fe9c076d4e84f32529dd67c6",
+    "f48b7fb03eb7d1f9b474d8f3206a9a1e"
+  ],
+  "completed_results": [
+    {
+      "sample_id": "sample_1",
+      "variant": "test_variant",
+      "step_results": [],
+      "total_execution_time": 0.5,
+      "total_token_usage": {},
+      "final_outputs": {
+        "output": "处理结果 1"
+      },
+      "error": null,
+      "created_at": "2025-12-09T16:19:23.265014"
+    },
+    {
+      "sample_id": "sample_2",
+      "variant": "test_variant",
+      "step_results": [],
+      "total_execution_time": 0.5,
+      "total_token_usage": {},
+      "final_outputs": {
+        "output": "处理结果 2"
+      },
+      "error": null,
+      "created_at": "2025-12-09T16:19:23.266027"
+    },
+    {
+      "sample_id": "sample_3",
+      "variant": "test_variant",
+      "step_results": [],
+      "total_execution_time": 0.5,
+      "total_token_usage": {},
+      "final_outputs": {
+        "output": "处理结果 3"
+      },
+      "error": null,
+      "created_at": "2025-12-09T16:19:23.266795"
+    }
+  ],
+  "failed_sample_indices": [],
+  "last_error": null,
+  "error_count": 0,
+  "metadata": {
+    "demo": true,
+    "created_by": "demo_script"
+  }
+}

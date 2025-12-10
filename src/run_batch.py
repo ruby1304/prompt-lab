@@ -16,18 +16,33 @@ from .paths import (
     default_batch_outfile, ensure_agent_dirs
 )
 from .agent_registry import load_agent, list_available_agents
+from .testset_filter import filter_samples_by_tags
 
 console = Console()
 
 
 def load_test_cases(path: Path) -> List[Dict[str, Any]]:
+    """加载测试集文件，支持可选的 tags 字段"""
     cases: List[Dict[str, Any]] = []
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+        for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
-            cases.append(json.loads(line))
+            try:
+                case = json.loads(line)
+                # 验证 tags 字段格式（如果存在）
+                if "tags" in case:
+                    if not isinstance(case["tags"], list):
+                        console.print(f"[yellow]警告：第 {line_num} 行的 tags 字段不是数组，已忽略[/]")
+                        case.pop("tags")
+                    elif not all(isinstance(tag, str) for tag in case["tags"]):
+                        console.print(f"[yellow]警告：第 {line_num} 行的 tags 数组包含非字符串元素，已忽略[/]")
+                        case.pop("tags")
+                cases.append(case)
+            except json.JSONDecodeError as e:
+                console.print(f"[red]错误：第 {line_num} 行 JSON 格式错误：{e}[/]")
+                continue
     return cases
 
 
@@ -37,6 +52,8 @@ def run(
     outfile: str = typer.Option("results.demo.csv", help="输出结果文件名，默认 data/results.demo.csv"),
     agent: str = typer.Option("", help="agent id，对应 agents/{agent}.yaml"),
     limit: int = typer.Option(0, help="最多运行多少条（0=全部）"),
+    include_tags: str = typer.Option("", help="只包含指定标签的样本，多个标签用逗号分隔"),
+    exclude_tags: str = typer.Option("", help="排除指定标签的样本，多个标签用逗号分隔"),
 ):
     """
     批量跑测试集：读取 JSONL -> 调用模型 -> 写入 CSV
@@ -112,6 +129,27 @@ def run(
         raise typer.Exit(1)
 
     cases = load_test_cases(in_path)
+    
+    # 应用标签过滤
+    include_tags_list = [tag.strip() for tag in include_tags.split(",") if tag.strip()] if include_tags else None
+    exclude_tags_list = [tag.strip() for tag in exclude_tags.split(",") if tag.strip()] if exclude_tags else None
+    
+    if include_tags_list or exclude_tags_list:
+        console.print(f"[bold cyan]标签过滤[/]")
+        if include_tags_list:
+            console.print(f"包含标签: {', '.join(include_tags_list)}")
+        if exclude_tags_list:
+            console.print(f"排除标签: {', '.join(exclude_tags_list)}")
+        
+        original_count = len(cases)
+        cases = filter_samples_by_tags(cases, include_tags_list, exclude_tags_list, show_stats=True)
+        
+        if len(cases) == 0:
+            console.print("[red]错误：过滤后没有剩余样本，请检查标签过滤条件[/]")
+            raise typer.Exit(1)
+        
+        console.print(f"过滤前样本数: {original_count}, 过滤后样本数: {len(cases)}")
+    
     if limit > 0:
         cases = cases[:limit]
 

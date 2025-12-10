@@ -20,20 +20,37 @@ from .paths import (
 from .agent_registry import load_agent, list_available_agents
 from .eval_llm_judge import build_judge_chain, judge_one
 from .rule_engine import apply_rules as apply_rules_engine
+from .testset_filter import filter_samples_by_tags
+from .pipeline_config import load_pipeline_config, list_available_pipelines
+from .pipeline_eval import PipelineEvaluator
+from .data_manager import get_pipeline_runs_dir, get_pipeline_evals_dir, get_pipeline_testsets_dir, ensure_pipeline_dirs
 
 app = typer.Typer()
 console = Console()
 
 
 def load_test_cases(path: Path) -> List[Dict[str, Any]]:
-    """加载测试用例"""
+    """加载测试用例，支持可选的 tags 字段"""
     cases: List[Dict[str, Any]] = []
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+        for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
-            cases.append(json.loads(line))
+            try:
+                case = json.loads(line)
+                # 验证 tags 字段格式（如果存在）
+                if "tags" in case:
+                    if not isinstance(case["tags"], list):
+                        console.print(f"[yellow]警告：第 {line_num} 行的 tags 字段不是数组，已忽略[/]")
+                        case.pop("tags")
+                    elif not all(isinstance(tag, str) for tag in case["tags"]):
+                        console.print(f"[yellow]警告：第 {line_num} 行的 tags 数组包含非字符串元素，已忽略[/]")
+                        case.pop("tags")
+                cases.append(case)
+            except json.JSONDecodeError as e:
+                console.print(f"[red]错误：第 {line_num} 行 JSON 格式错误：{e}[/]")
+                continue
     return cases
 
 
@@ -152,18 +169,25 @@ def print_rule_stats(rows: List[Dict[str, Any]], flow_list: List[str], console: 
 
 @app.callback(invoke_without_command=True)
 def run_eval(
-    agent: str = typer.Option(..., help="agent id，对应 agents/{agent}.yaml"),
+    agent: str = typer.Option("", help="agent id，对应 agents/{agent}.yaml"),
+    pipeline: str = typer.Option("", help="pipeline id，对应 pipelines/{pipeline}.yaml"),
     flows: str = typer.Option(
         "",
         "--flows",
         "-f", 
         help="用逗号分隔的flow名称；为空则使用agent的所有flows",
     ),
+    variants: str = typer.Option(
+        "",
+        "--variants",
+        "-v",
+        help="用逗号分隔的变体名称；为空则使用baseline",
+    ),
     infile: str = typer.Option(
         "",
         "--infile",
         "-i",
-        help="输入测试集文件；为空则使用agent的default_testset",
+        help="输入测试集文件；为空则使用默认测试集",
     ),
     outfile: str = typer.Option(
         "",
@@ -184,20 +208,55 @@ def run_eval(
         help="是否进行LLM judge评估（会自动启用规则评估）",
     ),
     limit: int = typer.Option(0, help="最多运行多少条（0=全部）"),
+    include_tags: str = typer.Option("", help="只包含指定标签的样本，多个标签用逗号分隔"),
+    exclude_tags: str = typer.Option("", help="排除指定标签的样本，多个标签用逗号分隔"),
 ):
     """
-    统一的评估执行工具：批量运行flow并可选择进行规则评估和LLM judge评估
+    统一的评估执行工具：支持 Agent 和 Pipeline 两种模式
+    
+    Agent 模式：
+    - 批量运行单个或多个 flow 并可选择进行规则评估和 LLM judge 评估
+    - 使用 --agent 参数指定 agent
+    
+    Pipeline 模式：
+    - 执行多步骤 pipeline 并支持变体比较
+    - 使用 --pipeline 参数指定 pipeline
+    - 使用 --variants 参数指定要比较的变体
     
     支持三种评估模式：
     1. 仅执行：不加任何评估参数
     2. 规则评估：--rules
     3. 规则+模型评估：--judge（会自动启用规则评估）
-    
-    支持单个flow执行或多个flow对比执行。
     """
     # 参数逻辑处理
     if judge:
         rules = True  # judge模式自动启用规则评估
+    
+    # 确定运行模式
+    if pipeline and agent:
+        console.print("[red]错误：不能同时指定 --agent 和 --pipeline 参数[/]")
+        raise typer.Exit(1)
+    
+    if not pipeline and not agent:
+        console.print("[red]错误：必须指定 --agent 或 --pipeline 参数[/]")
+        console.print("[yellow]提示：[/]")
+        console.print("  Agent 模式: python -m src eval --agent {agent_id}")
+        console.print("  Pipeline 模式: python -m src eval --pipeline {pipeline_id}")
+        raise typer.Exit(1)
+    
+    # Pipeline 模式
+    if pipeline:
+        return run_pipeline_eval(
+            pipeline=pipeline,
+            variants=variants,
+            infile=infile,
+            outfile=outfile,
+            rules=rules,
+            judge=judge,
+            limit=limit,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags
+        )
     # 加载agent配置
     try:
         agent_cfg = load_agent(agent)
@@ -269,6 +328,27 @@ def run_eval(
 
     # 加载测试用例
     cases = load_test_cases(in_path)
+    
+    # 应用标签过滤
+    include_tags_list = [tag.strip() for tag in include_tags.split(",") if tag.strip()] if include_tags else None
+    exclude_tags_list = [tag.strip() for tag in exclude_tags.split(",") if tag.strip()] if exclude_tags else None
+    
+    if include_tags_list or exclude_tags_list:
+        console.print(f"[bold cyan]标签过滤[/]")
+        if include_tags_list:
+            console.print(f"包含标签: {', '.join(include_tags_list)}")
+        if exclude_tags_list:
+            console.print(f"排除标签: {', '.join(exclude_tags_list)}")
+        
+        original_count = len(cases)
+        cases = filter_samples_by_tags(cases, include_tags_list, exclude_tags_list, show_stats=True)
+        
+        if len(cases) == 0:
+            console.print("[red]错误：过滤后没有剩余样本，请检查标签过滤条件[/]")
+            raise typer.Exit(1)
+        
+        console.print(f"过滤前样本数: {original_count}, 过滤后样本数: {len(cases)}")
+    
     if limit > 0:
         cases = cases[:limit]
 
@@ -759,6 +839,293 @@ def show_rules_stats_compare(rows: List[Dict[str, Any]], flow_list: List[str]):
         stats_table.add_row(flow, pass_rate_str, str(failed), violation_str)
     
     console.print(stats_table)
+
+
+def run_pipeline_eval(
+    pipeline: str,
+    variants: str,
+    infile: str,
+    outfile: str,
+    rules: bool,
+    judge: bool,
+    limit: int,
+    include_tags: str,
+    exclude_tags: str
+):
+    """执行 Pipeline 评估"""
+    
+    # 加载 pipeline 配置
+    try:
+        pipeline_config = load_pipeline_config(pipeline)
+        console.rule(f"[bold blue]Pipeline Eval · {pipeline_config.name}[/bold blue]")
+        console.print(f"[bold]Pipeline[/]: {pipeline_config.name}")
+        console.print(f"[dim]{pipeline_config.description}[/]")
+    except Exception as e:
+        console.print(f"[red]错误：{e}[/]")
+        available_pipelines = list_available_pipelines()
+        if available_pipelines:
+            console.print(f"[yellow]可用的 pipelines：{', '.join(available_pipelines)}[/]")
+        raise typer.Exit(1)
+
+    # 解析变体
+    variant_list = []
+    if variants:
+        variant_list = [x.strip() for x in variants.split(",") if x.strip()]
+        console.print(f"[bold]Variants[/]: {', '.join(variant_list)} (手动指定)")
+    else:
+        variant_list = ["baseline"]
+        console.print(f"[bold]Variants[/]: baseline (默认)")
+
+    # 验证变体是否存在
+    available_variants = ["baseline"] + list(pipeline_config.variants.keys())
+    for variant in variant_list:
+        if variant not in available_variants:
+            console.print(f"[red]错误：变体 '{variant}' 不存在[/]")
+            console.print(f"[yellow]可用变体：{', '.join(available_variants)}[/]")
+            raise typer.Exit(1)
+
+    # 确保 pipeline 目录存在
+    ensure_pipeline_dirs(pipeline_config.id)
+    
+    # 解析测试集
+    if not infile:
+        infile = pipeline_config.default_testset
+        console.print(f"[bold]Testset[/]: {infile} (使用 pipeline 默认测试集)")
+    else:
+        console.print(f"[bold]Testset[/]: {infile}")
+    
+    # 查找测试集文件
+    try:
+        testset_dir = get_pipeline_testsets_dir(pipeline_config.id)
+        in_path = testset_dir / infile
+        if not in_path.exists():
+            # 尝试在项目根目录查找
+            root_path = Path(infile)
+            if root_path.exists():
+                in_path = root_path
+            else:
+                raise FileNotFoundError(f"测试集文件不存在: {infile}")
+    except Exception as e:
+        console.print(f"[red]错误：{e}[/]")
+        # 显示可用的测试集
+        testset_dir = get_pipeline_testsets_dir(pipeline_config.id)
+        if testset_dir.exists():
+            available_testsets = [f.name for f in testset_dir.glob("*.jsonl")]
+            if available_testsets:
+                console.print(f"[yellow]提示：pipeline '{pipeline_config.id}' 的可用测试集：{', '.join(available_testsets)}[/]")
+        raise typer.Exit(1)
+
+    # 生成输出文件路径
+    if not outfile:
+        runs_dir = get_pipeline_runs_dir(pipeline_config.id)
+        ts = timestamp_str()
+        
+        if len(variant_list) == 1:
+            # 单变体模式
+            variant_part = variant_list[0]
+            filename = f"{ts}_batch_{variant_part}.csv"
+        else:
+            # 多变体对比模式
+            variants_str = "_".join(variant_list)
+            filename = f"{ts}_compare_{variants_str}.csv"
+        
+        out_path = runs_dir / filename
+        console.print(f"[bold]Output[/]: {filename} (自动生成)")
+    else:
+        # 如果是绝对路径，直接使用；否则在runs目录下
+        if Path(outfile).is_absolute():
+            out_path = Path(outfile)
+        else:
+            runs_dir = get_pipeline_runs_dir(pipeline_config.id)
+            out_path = runs_dir / outfile
+        console.print(f"[bold]Output[/]: {outfile}")
+
+    # 加载测试用例
+    cases = load_test_cases(in_path)
+    
+    # 应用标签过滤
+    include_tags_list = [tag.strip() for tag in include_tags.split(",") if tag.strip()] if include_tags else None
+    exclude_tags_list = [tag.strip() for tag in exclude_tags.split(",") if tag.strip()] if exclude_tags else None
+    
+    if include_tags_list or exclude_tags_list:
+        console.print(f"[bold cyan]标签过滤[/]")
+        if include_tags_list:
+            console.print(f"包含标签: {', '.join(include_tags_list)}")
+        if exclude_tags_list:
+            console.print(f"排除标签: {', '.join(exclude_tags_list)}")
+        
+        original_count = len(cases)
+        cases = filter_samples_by_tags(cases, include_tags_list, exclude_tags_list, show_stats=True)
+        
+        if len(cases) == 0:
+            console.print("[red]错误：过滤后没有剩余样本，请检查标签过滤条件[/]")
+            raise typer.Exit(1)
+        
+        console.print(f"过滤前样本数: {original_count}, 过滤后样本数: {len(cases)}")
+    
+    if limit > 0:
+        cases = cases[:limit]
+
+    if not cases:
+        console.print("[yellow]没有测试用例可执行。[/]")
+        raise typer.Exit()
+
+    console.print(f"[bold]Cases[/]: {len(cases)} 条")
+    
+    # 显示评估模式
+    eval_modes = []
+    if rules and not judge:
+        eval_modes.append("规则评估")
+    if judge:
+        eval_modes.append("规则+模型评估")
+    
+    if eval_modes:
+        console.print(f"[bold]Evaluation[/]: {' + '.join(eval_modes)}")
+    else:
+        console.print(f"[bold]Evaluation[/]: 仅执行（无评估）")
+
+    # 执行阶段
+    console.rule("[bold green]Pipeline 执行阶段[/bold green]")
+    
+    # 创建 Pipeline 评估器
+    evaluator = PipelineEvaluator(pipeline_config)
+    
+    # 设置进度回调
+    def progress_callback(current: int, total: int, message: str):
+        console.print(f"[{current+1}/{total}] {message}")
+    
+    evaluator.set_progress_callback(progress_callback)
+    
+    # 执行每个变体
+    all_results = []
+    variant_stats = {}
+    
+    for variant in variant_list:
+        console.print(f"\n[bold cyan]执行变体: {variant}[/bold cyan]")
+        
+        try:
+            # 执行 pipeline 评估
+            eval_result = evaluator.evaluate_pipeline(
+                samples=cases,
+                variant=variant,
+                apply_rules=rules,
+                apply_judge=judge,
+                limit=limit
+            )
+            
+            all_results.append(eval_result)
+            variant_stats[variant] = eval_result.overall_stats
+            
+            console.print(f"[green]变体 {variant} 执行完成！[/]")
+            console.print(f"执行时间: {eval_result.execution_time:.2f} 秒")
+            
+        except Exception as e:
+            console.print(f"[red]变体 {variant} 执行失败: {e}[/]")
+            continue
+    
+    if not all_results:
+        console.print("[red]所有变体执行失败[/]")
+        raise typer.Exit(1)
+    
+    # 保存结果
+    save_pipeline_results(all_results, out_path, variant_list)
+    console.print(f"[green]Pipeline 评估完成！结果已写入：[/] {out_path}")
+    
+    # 显示结果预览
+    console.rule("[bold blue]结果预览[/bold blue]")
+    show_pipeline_results_preview(all_results, variant_list)
+
+
+def save_pipeline_results(results: List, out_path: Path, variant_list: List[str]):
+    """保存 Pipeline 评估结果到 CSV 文件"""
+    if not results:
+        return
+    
+    # 准备 CSV 数据
+    rows = []
+    
+    for eval_result in results:
+        variant = eval_result.variant
+        
+        for sample_result in eval_result.sample_results:
+            row = {
+                "id": sample_result.sample_id,
+                "variant": variant,
+                "overall_score": sample_result.overall_score,
+                "must_have_pass": sample_result.must_have_pass,
+                "execution_time": sample_result.execution_time,
+                "judge_feedback": sample_result.judge_feedback or "",
+            }
+            
+            # 添加规则违规信息
+            if sample_result.rule_violations:
+                row["rule_violations"] = ",".join(sample_result.rule_violations)
+            else:
+                row["rule_violations"] = ""
+            
+            # 添加步骤输出
+            if sample_result.step_outputs:
+                for key, value in sample_result.step_outputs.items():
+                    row[f"output__{key}"] = str(value)
+            
+            rows.append(row)
+    
+    if rows:
+        # 写入 CSV 文件
+        fieldnames = list(rows[0].keys())
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+
+def show_pipeline_results_preview(results: List, variant_list: List[str]):
+    """显示 Pipeline 结果预览"""
+    if len(variant_list) == 1:
+        # 单变体预览
+        result = results[0]
+        console.print(f"[bold]变体: {result.variant}[/]")
+        console.print(f"样本数: {len(result.sample_results)}")
+        console.print(f"执行时间: {result.execution_time:.2f} 秒")
+        
+        # 显示评估统计
+        if result.overall_stats:
+            stats = result.overall_stats
+            if "avg_score" in stats:
+                console.print(f"平均分: {stats['avg_score']:.2f}")
+            if "must_have_pass_rate" in stats:
+                console.print(f"Must-Have 通过率: {stats['must_have_pass_rate']:.1f}%")
+    else:
+        # 多变体对比预览
+        comparison_table = Table(title="Pipeline Variants Comparison")
+        comparison_table.add_column("Variant", style="bold")
+        comparison_table.add_column("Samples", justify="right")
+        comparison_table.add_column("Avg Score", justify="right")
+        comparison_table.add_column("Must-Have Pass", justify="right")
+        comparison_table.add_column("Exec Time", justify="right")
+        
+        for result in results:
+            stats = result.overall_stats
+            avg_score = stats.get("avg_score", 0)
+            must_have_rate = stats.get("must_have_pass_rate", 0)
+            
+            # 颜色标记
+            if avg_score >= 8:
+                score_str = f"[green]{avg_score:.2f}[/green]"
+            elif avg_score >= 6:
+                score_str = f"[yellow]{avg_score:.2f}[/yellow]"
+            else:
+                score_str = f"[red]{avg_score:.2f}[/red]"
+            
+            comparison_table.add_row(
+                result.variant,
+                str(len(result.sample_results)),
+                score_str,
+                f"{must_have_rate:.1f}%",
+                f"{result.execution_time:.1f}s"
+            )
+        
+        console.print(comparison_table)
 
 
 def show_single_with_rules_preview(rows: List[Dict[str, Any]], fieldnames: List[str]):

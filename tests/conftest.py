@@ -14,6 +14,12 @@ from src.models import PipelineConfig, StepConfig, BaselineConfig, VariantConfig
 from src.agent_registry import AgentConfig, AgentFlow
 
 
+@pytest.fixture(autouse=True)
+def _set_default_model_env(monkeypatch):
+    """确保测试运行时不会依赖写死的模型名称。"""
+    monkeypatch.setenv("OPENAI_MODEL_NAME", "test-model")
+
+
 @pytest.fixture
 def temp_dir():
     """创建临时目录"""

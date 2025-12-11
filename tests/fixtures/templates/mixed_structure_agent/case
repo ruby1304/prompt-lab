@@ -1,0 +1,7 @@
+{
+  "input": "Mixed structure test data",
+  "context": "Testing mixed structure preference",
+  "user": "Mixed User",
+  "structure_type": "folder",
+  "should_be_preferred": true
+}

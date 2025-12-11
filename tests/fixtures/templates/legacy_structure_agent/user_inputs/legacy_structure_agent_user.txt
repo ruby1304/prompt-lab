@@ -1,0 +1,7 @@
+Legacy template request:
+
+Data: ${input}
+Context: {context}
+User: {user}
+
+Please process this using the legacy structure format.

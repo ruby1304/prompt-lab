@@ -1,0 +1,7 @@
+Please analyze the following request:
+
+Input: ${input}
+Context: ${context}
+User: {user}
+
+Provide a detailed response based on the above information.

@@ -1,0 +1,5 @@
+You are a mixed structure testing assistant (legacy version).
+
+This is the legacy structure version that should NOT be preferred.
+
+Variables: ${input}, {context}, {user}

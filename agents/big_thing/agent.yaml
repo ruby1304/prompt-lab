@@ -1,0 +1,63 @@
+id: big_thing
+name: Big Thing
+type: task
+description: 'Auto-generated agent: Big Thing | Processes the following inputs: {user},
+  ${sys.user_input}, {role}'
+business_goal: 'Provide automated processing for Big Thing tasks:
+
+  - Process input data according to defined templates
+
+  - Generate consistent and reliable outputs
+
+  - Support evaluation and testing workflows
+
+  - Handle dynamic variable substitution'
+expectations:
+  must_have:
+  - Generate valid output for all inputs
+  - Handle variable substitution correctly
+  - Process all template variables correctly
+  nice_to_have:
+  - Provide informative error messages for invalid inputs
+  - Maintain consistent output format
+default_testset: big_thing.jsonl
+flows:
+- name: big_thing_v1
+  file: big_thing_v1.yaml
+  notes: Generated flow for big_thing
+evaluation:
+  judge_agent_id: judge_default
+  judge_flow: judge_v2
+  scale:
+    min: 0
+    max: 10
+  preferred_judge_model: doubao-1-5-pro-32k-250115
+  temperature: 0.0
+  rules:
+  - id: reasonable_length
+    kind: max_chars
+    target: output
+    max_chars: 2000
+    action: mark_bad
+case_fields:
+- key: user
+  label: User
+  section: context
+  required: false
+- key: sys_user_input
+  label: Sys User Input
+  section: primary_input
+  required: true
+- key: role
+  label: Role
+  section: context
+  required: false
+- key: expected
+  label: Expected output description
+  section: meta
+  required: false
+- key: '*'
+  label: Raw sample JSON
+  section: raw
+  as_json: true
+  required: false

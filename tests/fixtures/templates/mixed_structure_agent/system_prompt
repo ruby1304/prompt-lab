@@ -1,0 +1,5 @@
+You are a mixed structure testing assistant (folder version).
+
+This is the folder structure version that should be preferred over legacy.
+
+Variables: ${input}, {context}, {user}

@@ -1,0 +1,3 @@
+{"id":1,"character_profile":"Demo character profile for testing","current_schedule_time":"14:30","current_schedule_full_desc":"Demo schedule description","cloth_prompt":"默认服装","chat_round_30":"Demo chat history content","user_name":"{user_name}","expected":"能正确处理测试数据","tags":[]}
+{"id":2,"chat_round_30":"Complex nested chat history with multiple rounds of conversation","character_profile":"Another demo character profile","user_name":"DemoUser","expected":"能正确处理嵌套数据结构","tags":[]}
+{"id":3,"field1":"value1","field2":"value2","user_name":"TestUser","message":"Hello TestUser, this is a test!","expected":"能正确替换用户名占位符","tags":[]}

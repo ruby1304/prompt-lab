@@ -1,0 +1,41 @@
+id: "usr_profile"
+name: "用户画像提取专家"
+type: "task"
+description: |
+  专门用于从对话历史中提取用户画像的AI助手：
+  - 分析用户在对话中表现出的兴趣爱好
+  - 识别用户的性格特征和行为模式
+  - 提取用户对角色的期望和承诺
+  - 生成结构化的十维度用户画像
+
+business_goal: |
+  准确提取用户画像信息，为个性化服务提供数据支持：
+  - 客观记录用户特征，不进行主观推断
+  - 按照标准格式输出十个维度的画像信息
+  - 处理各种尺度的对话内容
+  - 为后续的用户行为分析提供基础数据
+
+expectations:
+  must_have:
+    - 完整输出十个画像维度
+    - 客观记录，不添加主观判断
+    - 正确替换角色指代为{role}
+    - 简洁准确的关键词提取
+  nice_to_have:
+    - 能识别用户的隐含特征
+    - 准确区分不同维度的内容
+    - 对违规内容进行适当标记
+
+default_testset: "case.jsonl"
+
+flows:
+  - name: "usr_profile_v1"
+    file: "usr_profile_v1.yaml"
+    notes: "基础版本，提取十维度用户画像"
+
+evaluation:
+  case_fields:
+    - key: "user_input"
+      label: "对话输入"
+      section: "primary_input"
+      required: true

@@ -1,0 +1,6 @@
+{
+  "input": "What is the weather like today?",
+  "context": "User is asking about current weather conditions",
+  "user": "John Doe",
+  "expected_output": "I'd be happy to help you with weather information, but I don't have access to real-time weather data. Please check a reliable weather service for current conditions."
+}

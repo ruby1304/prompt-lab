@@ -1,8 +1,15 @@
-# Prompt Lab - Pipeline Regression System
+# Prompt Lab - AI Agent Development Platform
 
-一个强大的 AI Agent 和 Pipeline 评估、测试和回归分析平台。支持单 Agent 评估、多步骤 Pipeline 执行、基线管理和自动化回归测试。
+一个强大的 AI Agent 开发、评估、测试和回归分析平台。支持从模板快速生成 Agent 配置、单 Agent 评估、多步骤 Pipeline 执行、基线管理和自动化回归测试。
 
 ## 🚀 核心功能
+
+### 🎯 Agent Template Parser (NEW!)
+- **模板到配置转换**: 从文本模板自动生成符合规范的 Agent 配置
+- **智能变量映射**: 自动识别和映射模板变量到配置字段
+- **批量测试集生成**: 批量处理 JSON 数据生成标准测试集
+- **LLM 增强优化**: 使用 LLM 自动优化和修正配置文件
+- **错误处理恢复**: 智能错误检测和多级回退机制
 
 ### Agent 评估
 - **单 Agent 测试**: 快速评估单个 Agent 的性能
@@ -33,6 +40,29 @@ pip install -r requirements.txt
 ```
 
 ### 基本使用
+
+#### 0. Agent Template Parser (快速创建 Agent)
+
+```bash
+# 从模板文件创建 Agent
+python -m src.agent_template_parser.cli create-agent \
+  --system-prompt templates/system_prompts/my_agent_system.txt \
+  --user-input templates/user_inputs/my_agent_user.txt \
+  --test-case templates/test_cases/my_agent_test.json \
+  --agent-name my_agent
+
+# 批量创建测试集
+python -m src.agent_template_parser.cli create-testset \
+  --json-files data1.json data2.json data3.json \
+  --target-agent existing_agent \
+  --output-filename batch_testset.jsonl
+
+# 查看可用模板
+python -m src.agent_template_parser.cli list-templates
+
+# 验证模板文件
+python -m src.agent_template_parser.cli validate-templates --agent-name my_agent
+```
 
 #### 1. Agent 评估
 
@@ -97,6 +127,12 @@ prompt-lab/
 │       └── testsets/         # 测试集文件
 ├── pipelines/                # Pipeline 配置目录
 │   └── {pipeline_id}.yaml   # Pipeline 配置文件
+├── templates/                # 模板文件目录 (NEW!)
+│   ├── system_prompts/      # 系统提示词模板
+│   ├── user_inputs/         # 用户输入模板
+│   └── test_cases/          # 测试用例文件
+├── examples/                 # 示例文件
+│   └── batch_json_examples/ # 批量处理示例
 ├── data/                     # 数据存储目录
 │   ├── agents/              # Agent 数据
 │   │   └── {agent_id}/
@@ -112,6 +148,7 @@ prompt-lab/
 │       ├── agents/
 │       └── pipelines/
 ├── src/                     # 源代码
+│   └── agent_template_parser/ # Agent 模板解析器 (NEW!)
 ├── docs/                    # 文档
 │   └── reference/          # 参考文档
 └── tests/                   # 测试代码
@@ -316,6 +353,12 @@ mypy src/
 
 ### 参考文档
 
+#### Agent Template Parser 文档 (NEW!)
+- **[Agent Template Parser README](src/agent_template_parser/README.md)** - 完整的功能介绍和 API 文档
+- **[使用指南](docs/USAGE_GUIDE.md)** - 详细的使用教程和实际案例
+- **[故障排除指南](docs/TROUBLESHOOTING.md)** - 常见问题和解决方案
+
+#### 系统文档
 - **[Pipeline 配置指南](docs/reference/pipeline-guide.md)** - 详细的 Pipeline 配置语法和示例
 - **[回归测试指南](docs/reference/regression-testing.md)** - 回归测试工作流程和最佳实践
 - **[数据结构指南](docs/reference/data-structure-guide.md)** - 数据文件格式和组织结构

@@ -1,0 +1,82 @@
+id: "mem_l1_summarizer"
+name: "一级记忆总结助手"
+type: "task"
+
+description: |
+  负责处理「一级记忆」层的对话总结：
+  - 输入为已经拼好的对话 + 日程时间线 fullContent
+  - 输出为 4~10 句的客观第三人称总结
+  - 所有用户指代统一为 {user}，角色指代统一为 {role}
+  - 保留具体日期和早/中/晚等时间段信息
+
+business_goal: |
+  为后续二级、三级记忆以及用户画像 / 大事件分析提供稳定的一级记忆基石：
+  - 对任何尺度、任何内容的对话都能稳定产出总结（包括尺度较大的、混乱邪恶角色）
+  - 严格遵守指代替换规则，避免混用昵称、人称
+  - 在有限 tokens 内尽量完整覆盖关键信息（时间线、事件、情绪、约定）
+
+expectations:
+  must_have:
+    - 始终输出 4~10 句总结，不允许空输出或拒答
+    - 正确将所有用户指代替换为 {user}
+    - 正确将所有角色指代替换为 {role}
+    - 保留对话中出现的具体日期与早/中/晚等时间段信息
+    - 基于 fullContent 覆盖主要事件、关系互动和情绪变化
+  nice_to_have:
+    - 能自然点出重要约定或对后续剧情重要的事件
+    - 能体现 {user} 与 {role} 关系的阶段性变化
+    - 对极端 / 异常行为有轻微标记（如“行为偏激”“尺度较大”等），方便后续机器判断
+
+default_testset: "mem_l1.jsonl"
+
+flows:
+  - name: "mem_l1_v1"
+    file: "mem_l1_v1.yaml"
+    notes: "一级记忆：基于 fullContent 的标准 4~10 句对话总结"
+
+evaluation:
+  judge_agent_id: "judge_default"
+  judge_flow: "judge_v2"
+  scale:
+    min: 0
+    max: 10
+  preferred_judge_model: "doubao-1-5-pro-32k-250115"
+  temperature: 0.0
+
+  rules:
+    - id: "reasonable_length"
+      kind: "max_chars"
+      target: "output"
+      max_chars: 2000
+      action: "mark_bad"
+
+  case_fields:
+    # 主要输入：拼好的时间线
+    - key: "fullContent"
+      label: "对话与日程时间线"
+      section: "primary_input"
+      required: true
+
+    # 可选：占位符，如果你想在 testset 里改成别的字符串
+    - key: "user"
+      label: "用户指代占位符"
+      section: "context"
+      required: false
+
+    - key: "role"
+      label: "角色指代占位符"
+      section: "context"
+      required: false
+
+    # 期望说明
+    - key: "expected"
+      label: "测试期望说明"
+      section: "meta"
+      required: false
+
+    # 兜底原始样本
+    - key: "*"
+      label: "原始样本 JSON"
+      section: "raw"
+      as_json: true
+      required: false

@@ -1,0 +1,6 @@
+{
+  "input": "Test legacy structure functionality",
+  "context": "Testing backward compatibility",
+  "user": "Legacy User",
+  "expected_behavior": "Should work with existing legacy template structure"
+}

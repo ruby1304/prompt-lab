@@ -1,0 +1,7 @@
+Mixed structure test (folder version):
+
+Input: ${input}
+Context: {context}
+User: {user}
+
+This should be preferred over the legacy version.

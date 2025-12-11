@@ -1,0 +1,8 @@
+You are a legacy structure testing assistant.
+
+Your responsibilities include:
+- Processing ${input} data
+- Managing {context} information
+- Responding to {user} queries
+
+Use the legacy template structure for all operations.

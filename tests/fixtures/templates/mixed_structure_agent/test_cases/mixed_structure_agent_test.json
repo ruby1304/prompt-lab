@@ -1,0 +1,7 @@
+{
+  "input": "Mixed structure test data (legacy)",
+  "context": "Testing mixed structure preference (legacy)",
+  "user": "Mixed User (legacy)",
+  "structure_type": "legacy",
+  "should_be_preferred": false
+}

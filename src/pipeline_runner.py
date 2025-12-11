@@ -554,8 +554,11 @@ def create_progress_printer(pipeline_name: str) -> callable:
     """创建进度打印回调函数"""
     def print_progress(current: int, total: int, message: str = ""):
         percentage = (current / total) * 100 if total > 0 else 0
-        print(f"\r正在执行 Pipeline: {pipeline_name} [{current}/{total}] {percentage:.1f}% {message}", end="", flush=True)
-        if current == total:
-            print()  # 完成时换行
-    
+        end = "\n" if current == total else ""
+        print(
+            f"\r正在执行 Pipeline: {pipeline_name} [{current}/{total}] {percentage:.1f}% {message}",
+            end=end,
+            flush=True,
+        )
+
     return print_progress

@@ -230,6 +230,31 @@ class PipelineConfig:
     outputs: List[OutputSpec] = field(default_factory=list)
     baseline: Optional[BaselineConfig] = None
     variants: Dict[str, VariantConfig] = field(default_factory=dict)
+
+    def __post_init__(self):
+        """标准化配置字段，确保都为模型实例。"""
+        self.inputs = [
+            input_spec if isinstance(input_spec, InputSpec)
+            else InputSpec.from_dict(input_spec)
+            for input_spec in self.inputs
+        ]
+
+        self.outputs = [
+            output_spec if isinstance(output_spec, OutputSpec)
+            else OutputSpec.from_dict(output_spec)
+            for output_spec in self.outputs
+        ]
+
+        self.steps = [
+            step if isinstance(step, StepConfig)
+            else StepConfig(**step)
+            for step in self.steps
+        ]
+
+        self.variants = {
+            name: variant if isinstance(variant, VariantConfig) else VariantConfig(**variant)
+            for name, variant in self.variants.items()
+        }
     
     def validate(self) -> List[str]:
         """验证 pipeline 配置"""

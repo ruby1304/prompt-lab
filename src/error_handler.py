@@ -92,7 +92,7 @@ class PipelineError(Exception):
 
 class ConfigurationError(PipelineError):
     """配置错误"""
-    
+
     def __init__(self, message: str, suggestion: str = "", **kwargs):
         super().__init__(
             message=message,
@@ -101,6 +101,13 @@ class ConfigurationError(PipelineError):
             suggestion=suggestion or "请检查配置文件格式和内容",
             **kwargs
         )
+
+
+class ConfigError(ConfigurationError):
+    """与旧代码兼容的配置错误别名。"""
+
+    def __init__(self, message: str, suggestion: str = "", **kwargs):
+        super().__init__(message=message, suggestion=suggestion, **kwargs)
 
 
 class ExecutionError(PipelineError):

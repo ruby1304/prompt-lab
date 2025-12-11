@@ -43,9 +43,10 @@ class TestsetFilter:
         
         include_set = set(include_tags) if include_tags else None
         exclude_set = set(exclude_tags) if exclude_tags else None
-        
+
         for sample in samples:
-            sample_tags = set(sample.get("tags", []))
+            raw_tags = sample.get("tags") or []
+            sample_tags = set(raw_tags)
             
             # 应用 include 过滤
             if include_set and not sample_tags.intersection(include_set):

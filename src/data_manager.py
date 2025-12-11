@@ -20,10 +20,20 @@ except ImportError:
 
 class DataManager:
     """数据目录和文件管理器"""
-    
-    def __init__(self, root_dir: Optional[Path] = None):
-        self.root_dir = root_dir or ROOT_DIR
-        self.data_dir = self.root_dir / "data"
+
+    def __init__(self, root_dir: Optional[Path] = None, base_dir: Optional[Path] = None):
+        """初始化数据管理器。
+
+        Args:
+            root_dir: 仓库根目录，默认使用项目内置路径。
+            base_dir: 可选的数据目录。当在测试或临时环境下使用时，可指定单独的数据目录，覆盖默认路径。
+        """
+        if base_dir:
+            self.data_dir = Path(base_dir)
+            self.root_dir = self.data_dir.parent
+        else:
+            self.root_dir = root_dir or ROOT_DIR
+            self.data_dir = self.root_dir / "data"
     
     # 目录结构管理
     def get_agent_base_dir(self, agent_id: str) -> Path:

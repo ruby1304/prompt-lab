@@ -8,7 +8,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def get_openai_model_name() -> str:
-    return os.getenv("OPENAI_MODEL_NAME", "gpt-4.1-mini")
+    model = os.getenv("OPENAI_MODEL_NAME")
+    if not model:
+        raise EnvironmentError(
+            "OPENAI_MODEL_NAME environment variable is required to select an OpenAI model"
+        )
+    return model
 
 def get_openai_temperature() -> float:
     try:

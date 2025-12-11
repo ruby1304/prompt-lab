@@ -43,7 +43,11 @@ class LLMEnhancer:
             
             # 如果没有指定模型，使用项目默认配置
             from ..config import get_openai_model_name
-            model_name = self.model_name or get_openai_model_name()
+
+            try:
+                model_name = self.model_name or get_openai_model_name()
+            except EnvironmentError as exc:
+                raise LLMEnhancementError(str(exc)) from exc
             
             self._llm = ChatOpenAI(
                 model=model_name,

@@ -1,0 +1,26 @@
+id: "text_cleaner"
+name: "文本清洗助手"
+type: "task"
+description: |
+  负责清洗和规范化文本内容：
+  - 移除多余的空白字符和换行
+  - 修正常见的格式问题
+  - 统一标点符号
+  - 保持文本的可读性
+
+business_goal: |
+  提供干净、规范的文本，为后续处理步骤做准备
+
+expectations:
+  must_have:
+    - 移除多余的空白字符
+    - 保持文本的原始含义
+    - 输出格式统一
+  nice_to_have:
+    - 修正常见的拼写错误
+    - 统一标点符号格式
+
+flows:
+  - name: "clean_v1"
+    file: "clean_v1.yaml"
+    notes: "基础清洗版本"

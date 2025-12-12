@@ -35,18 +35,24 @@ class StepResult:
     output_value: Any
     execution_time: float
     token_usage: Dict[str, int] = field(default_factory=dict)
+    parser_stats: Optional[Dict[str, Any]] = None  # 新增：Output Parser 统计信息
     error: Optional[str] = None
+    success: bool = True  # 新增：明确标记步骤是否成功
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
-        return {
+        result = {
             "step_id": self.step_id,
             "output_key": self.output_key,
             "output_value": self.output_value,
             "execution_time": self.execution_time,
             "token_usage": self.token_usage,
-            "error": self.error
+            "error": self.error,
+            "success": self.success
         }
+        if self.parser_stats:
+            result["parser_stats"] = self.parser_stats
+        return result
 
 
 @dataclass
@@ -57,13 +63,101 @@ class PipelineResult:
     step_results: List[StepResult] = field(default_factory=list)
     total_execution_time: float = 0.0
     total_token_usage: Dict[str, int] = field(default_factory=dict)
+    total_parser_stats: Optional[Dict[str, Any]] = None  # 新增：聚合的 Parser 统计信息
     final_outputs: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
     
+    def get_step_outputs_dict(self) -> Dict[str, Any]:
+        """
+        获取所有步骤的输出字典
+        
+        Returns:
+            {output_key: output_value} 格式的字典
+        """
+        return {
+            step.output_key: step.output_value 
+            for step in self.step_results 
+            if step.success
+        }
+    
+    def get_failed_steps(self) -> List[StepResult]:
+        """
+        获取所有失败的步骤
+        
+        Returns:
+            失败步骤的列表
+        """
+        return [step for step in self.step_results if not step.success]
+    
+    def get_evaluation_target_output(self, target_step_id: Optional[str] = None) -> Tuple[str, Any]:
+        """
+        获取评估目标步骤的输出
+        
+        Args:
+            target_step_id: 目标步骤ID，如果为None则使用最后一个成功的步骤
+            
+        Returns:
+            (step_id, output_value) 元组
+        """
+        if target_step_id:
+            # 查找指定的步骤
+            for step in self.step_results:
+                if step.step_id == target_step_id and step.success:
+                    return step.step_id, step.output_value
+            # 如果找不到或步骤失败，返回空
+            return target_step_id, ""
+        else:
+            # 使用最后一个成功的步骤
+            for step in reversed(self.step_results):
+                if step.success:
+                    return step.step_id, step.output_value
+            # 如果没有成功的步骤，返回空
+            return "", ""
+    
+    def get_performance_summary(self, detailed: bool = False) -> Dict[str, Any]:
+        """
+        生成性能摘要
+        
+        Args:
+            detailed: 是否包含详细信息（每个步骤的性能）
+            
+        Returns:
+            性能摘要字典
+        """
+        summary = {
+            "sample_id": self.sample_id,
+            "variant": self.variant,
+            "total_execution_time": self.total_execution_time,
+            "total_steps": len(self.step_results),
+            "successful_steps": len([s for s in self.step_results if s.success]),
+            "failed_steps": len([s for s in self.step_results if not s.success]),
+            "token_usage": self.total_token_usage,
+            "success": self.error is None
+        }
+        
+        # 添加 parser 统计信息
+        if self.total_parser_stats:
+            summary["parser_stats"] = self.total_parser_stats
+        
+        # 添加详细的步骤性能信息
+        if detailed:
+            summary["step_performance"] = [
+                {
+                    "step_id": step.step_id,
+                    "execution_time": step.execution_time,
+                    "token_usage": step.token_usage,
+                    "parser_stats": step.parser_stats,
+                    "success": step.success
+                }
+                for step in self.step_results
+            ]
+        
+        return summary
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
-        return {
+        result = {
             "sample_id": self.sample_id,
             "variant": self.variant,
             "step_results": [step.to_dict() for step in self.step_results],
@@ -73,6 +167,9 @@ class PipelineResult:
             "error": self.error,
             "created_at": self.created_at.isoformat()
         }
+        if self.total_parser_stats:
+            result["total_parser_stats"] = self.total_parser_stats
+        return result
 
 
 class PipelineExecutionError(Exception):
@@ -210,12 +307,26 @@ class PipelineRunner:
             elif self.progress_callback:
                 self.progress_callback(total_samples, total_samples, "Pipeline 执行完成")
             
+            # 生成并记录性能摘要
+            perf_summary = self.generate_aggregate_performance_summary(results, detailed=False)
+            logger.info(f"Pipeline 执行完成，成功处理 {perf_summary['successful_samples']}/{perf_summary['total_samples']} 个样本")
+            logger.info(f"总执行时间: {perf_summary['total_execution_time']:.2f}秒, 平均: {perf_summary['average_execution_time']:.2f}秒/样本")
+            logger.info(f"总 token 使用: {perf_summary['total_token_usage']['total_tokens']}, 平均: {perf_summary['average_token_usage']['total_tokens']:.0f}/样本")
+            
+            # 在调试模式下输出详细信息
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("详细性能摘要:")
+                logger.debug(f"  - 输入 tokens: {perf_summary['total_token_usage']['input_tokens']}")
+                logger.debug(f"  - 输出 tokens: {perf_summary['total_token_usage']['output_tokens']}")
+                if perf_summary.get('parser_stats'):
+                    logger.debug(f"  - Parser 成功率: {perf_summary['parser_stats']['success_rate']:.2%}")
+                    logger.debug(f"  - Parser 平均重试: {perf_summary['parser_stats']['average_retries']:.2f}")
+            
         except Exception as e:
             if progress_tracker:
                 progress_tracker.finish("Pipeline 执行过程中出现错误")
             raise
         
-        logger.info(f"Pipeline 执行完成，成功处理 {len([r for r in results if not r.error])}/{total_samples} 个样本")
         return results
     
     def execute_sample(self, sample: Dict[str, Any], variant: str = "baseline", 
@@ -251,32 +362,62 @@ class PipelineRunner:
             variant_config = self._get_variant_config(variant)
             
             # 执行每个步骤
+            failed_outputs = set()  # 跟踪失败步骤的输出
+            
             for step_index, step in enumerate(self.config.steps):
                 # 更新进度（开始执行步骤）
                 if progress_tracker:
                     progress_tracker.update_sample(sample_index, sample_id, step_index, step.id)
                 
+                # 检查此步骤是否依赖失败的步骤
+                dependencies = step.get_dependencies()
+                has_failed_dependency = any(dep in failed_outputs for dep in dependencies)
+                
+                if has_failed_dependency:
+                    # 跳过此步骤，因为它依赖的步骤失败了
+                    logger.warning(f"跳过步骤 '{step.id}'，因为它依赖的步骤失败了")
+                    skipped_result = StepResult(
+                        step_id=step.id,
+                        output_key=step.output_key,
+                        output_value="",
+                        execution_time=0.0,
+                        error="依赖的步骤失败，跳过执行",
+                        success=False
+                    )
+                    result.step_results.append(skipped_result)
+                    failed_outputs.add(step.output_key)
+                    continue
+                
+                # 执行步骤
                 step_result = self.execute_step(step, variant_config)
                 result.step_results.append(step_result)
                 
-                # 如果步骤执行失败，停止后续步骤
-                if step_result.error:
-                    raise create_execution_error(
-                        message=f"步骤 '{step.id}' 执行失败: {step_result.error}",
-                        suggestion="请检查步骤配置和输入数据",
-                        step_id=step.id,
-                        sample_id=sample_id
-                    )
-                
-                # 将步骤输出添加到上下文
-                self.context[step_result.output_key] = step_result.output_value
+                # 如果步骤执行失败
+                if not step_result.success:
+                    failed_outputs.add(step_result.output_key)
+                    
+                    # 如果是必需步骤，停止整个 Pipeline
+                    if step.required:
+                        raise create_execution_error(
+                            message=f"必需步骤 '{step.id}' 执行失败: {step_result.error}",
+                            suggestion="请检查步骤配置和输入数据",
+                            step_id=step.id,
+                            sample_id=sample_id
+                        )
+                    else:
+                        # 可选步骤失败，记录警告但继续执行
+                        logger.warning(f"可选步骤 '{step.id}' 执行失败: {step_result.error}")
+                else:
+                    # 将步骤输出添加到上下文
+                    self.context[step_result.output_key] = step_result.output_value
             
             # 收集最终输出
             result.final_outputs = self._collect_final_outputs()
             
-            # 计算总执行时间和token使用量
+            # 计算总执行时间、token使用量和parser统计
             result.total_execution_time = time.time() - start_time
             result.total_token_usage = self._calculate_total_token_usage(result.step_results)
+            result.total_parser_stats = self._aggregate_parser_stats(result.step_results)
             
         except Exception as e:
             result.error = str(e)
@@ -308,7 +449,7 @@ class PipelineRunner:
             logger.debug(f"执行步骤 '{step.id}': agent={step.agent}, flow={flow_name}")
             
             # 执行 Agent/Flow
-            output_content, token_usage = self._execute_agent_flow(
+            output_content, token_usage, parser_stats = self._execute_agent_flow(
                 agent_id=step.agent,
                 flow_name=flow_name,
                 inputs=step_inputs,
@@ -322,7 +463,9 @@ class PipelineRunner:
                 output_key=step.output_key,
                 output_value=output_content,
                 execution_time=execution_time,
-                token_usage=token_usage
+                token_usage=token_usage,
+                parser_stats=parser_stats,
+                success=True
             )
             
         except Exception as e:
@@ -334,7 +477,8 @@ class PipelineRunner:
                 output_key=step.output_key,
                 output_value="",
                 execution_time=execution_time,
-                error=error_msg
+                error=error_msg,
+                success=False
             )
     
     def _get_variant_config(self, variant: str) -> Optional[VariantConfig]:
@@ -407,7 +551,7 @@ class PipelineRunner:
         
         return flow_name, model_override
     
-    def _execute_agent_flow(self, agent_id: str, flow_name: str, inputs: Dict[str, Any], model_override: Optional[str] = None) -> Tuple[str, Dict[str, int]]:
+    def _execute_agent_flow(self, agent_id: str, flow_name: str, inputs: Dict[str, Any], model_override: Optional[str] = None) -> Tuple[str, Dict[str, int], Optional[Dict[str, Any]]]:
         """
         执行 Agent/Flow 组合
         
@@ -418,7 +562,7 @@ class PipelineRunner:
             model_override: 模型覆盖（可选）
             
         Returns:
-            (输出内容, token使用统计) 元组
+            (输出内容, token使用统计, parser统计) 元组
         """
         try:
             # 验证 agent 存在
@@ -440,13 +584,13 @@ class PipelineRunner:
                 extra_vars["_model_override"] = model_override
             
             # 执行 flow
-            output_content, token_usage = run_flow_with_tokens(
+            output_content, token_usage, parser_stats = run_flow_with_tokens(
                 flow_name=flow_name,
                 extra_vars=extra_vars,
                 agent_id=agent_id
             )
             
-            return output_content, token_usage
+            return output_content, token_usage, parser_stats
             
         except Exception as e:
             raise create_execution_error(
@@ -481,6 +625,36 @@ class PipelineRunner:
                     total_usage[key] += step_result.token_usage.get(key, 0)
         
         return total_usage
+    
+    def _aggregate_parser_stats(self, step_results: List[StepResult]) -> Optional[Dict[str, Any]]:
+        """聚合所有步骤的 Parser 统计信息"""
+        total_stats = {
+            "success_count": 0,
+            "failure_count": 0,
+            "total_retry_count": 0,
+            "success_rate": 0.0,
+            "average_retries": 0.0
+        }
+        
+        has_stats = False
+        
+        for step_result in step_results:
+            if step_result.parser_stats:
+                has_stats = True
+                total_stats["success_count"] += step_result.parser_stats.get("success_count", 0)
+                total_stats["failure_count"] += step_result.parser_stats.get("failure_count", 0)
+                total_stats["total_retry_count"] += step_result.parser_stats.get("total_retry_count", 0)
+        
+        if not has_stats:
+            return None
+        
+        # 计算聚合的成功率和平均重试次数
+        total_attempts = total_stats["success_count"] + total_stats["failure_count"]
+        if total_attempts > 0:
+            total_stats["success_rate"] = total_stats["success_count"] / total_attempts
+            total_stats["average_retries"] = total_stats["total_retry_count"] / total_attempts
+        
+        return total_stats
     
     def validate_pipeline(self) -> List[str]:
         """
@@ -548,6 +722,87 @@ class PipelineRunner:
             errors.append(f"Pipeline 验证过程中出现异常: {str(e)}")
         
         return errors
+
+
+    @staticmethod
+    def generate_aggregate_performance_summary(
+        results: List[PipelineResult],
+        detailed: bool = False
+    ) -> Dict[str, Any]:
+        """
+        生成多个结果的聚合性能摘要
+        
+        Args:
+            results: Pipeline 执行结果列表
+            detailed: 是否包含详细信息
+            
+        Returns:
+            聚合性能摘要字典
+        """
+        if not results:
+            return {
+                "total_samples": 0,
+                "successful_samples": 0,
+                "failed_samples": 0,
+                "total_execution_time": 0.0,
+                "average_execution_time": 0.0,
+                "total_token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "success_rate": 0.0
+            }
+        
+        total_samples = len(results)
+        successful_samples = len([r for r in results if not r.error])
+        failed_samples = total_samples - successful_samples
+        
+        total_execution_time = sum(r.total_execution_time for r in results)
+        average_execution_time = total_execution_time / total_samples if total_samples > 0 else 0.0
+        
+        # 聚合 token 使用量
+        total_token_usage = {
+            "input_tokens": sum(r.total_token_usage.get("input_tokens", 0) for r in results),
+            "output_tokens": sum(r.total_token_usage.get("output_tokens", 0) for r in results),
+            "total_tokens": sum(r.total_token_usage.get("total_tokens", 0) for r in results)
+        }
+        
+        # 聚合 parser 统计
+        total_parser_stats = None
+        parser_results = [r for r in results if r.total_parser_stats]
+        if parser_results:
+            total_parser_stats = {
+                "success_count": sum(r.total_parser_stats.get("success_count", 0) for r in parser_results),
+                "failure_count": sum(r.total_parser_stats.get("failure_count", 0) for r in parser_results),
+                "total_retry_count": sum(r.total_parser_stats.get("total_retry_count", 0) for r in parser_results)
+            }
+            total_attempts = total_parser_stats["success_count"] + total_parser_stats["failure_count"]
+            if total_attempts > 0:
+                total_parser_stats["success_rate"] = total_parser_stats["success_count"] / total_attempts
+                total_parser_stats["average_retries"] = total_parser_stats["total_retry_count"] / total_attempts
+            else:
+                total_parser_stats["success_rate"] = 0.0
+                total_parser_stats["average_retries"] = 0.0
+        
+        summary = {
+            "total_samples": total_samples,
+            "successful_samples": successful_samples,
+            "failed_samples": failed_samples,
+            "success_rate": successful_samples / total_samples if total_samples > 0 else 0.0,
+            "total_execution_time": total_execution_time,
+            "average_execution_time": average_execution_time,
+            "total_token_usage": total_token_usage,
+            "average_token_usage": {
+                "input_tokens": total_token_usage["input_tokens"] / total_samples if total_samples > 0 else 0,
+                "output_tokens": total_token_usage["output_tokens"] / total_samples if total_samples > 0 else 0,
+                "total_tokens": total_token_usage["total_tokens"] / total_samples if total_samples > 0 else 0
+            }
+        }
+        
+        if total_parser_stats:
+            summary["parser_stats"] = total_parser_stats
+        
+        if detailed:
+            summary["sample_summaries"] = [r.get_performance_summary(detailed=False) for r in results]
+        
+        return summary
 
 
 def create_progress_printer(pipeline_name: str) -> callable:

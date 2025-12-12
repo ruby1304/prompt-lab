@@ -1,0 +1,26 @@
+id: "entity_extractor"
+name: "实体提取助手"
+type: "task"
+description: |
+  负责从用户消息中提取关键实体：
+  - 提取产品名称、订单号等
+  - 识别时间、地点等信息
+  - 提取联系方式
+  - 结构化输出实体信息
+
+business_goal: |
+  准确提取用户消息中的关键实体，为客服处理提供结构化信息
+
+expectations:
+  must_have:
+    - 准确提取常见实体类型
+    - 输出结构化的实体信息
+    - 处理多个实体的情况
+  nice_to_have:
+    - 识别实体之间的关系
+    - 处理模糊或不完整的实体
+
+flows:
+  - name: "extract_v1"
+    file: "extract_v1.yaml"
+    notes: "基础实体提取"

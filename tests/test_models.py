@@ -601,6 +601,8 @@ class TestEvaluationResult:
         """测试 EvaluationResult 创建"""
         result = EvaluationResult(
             sample_id="sample1",
+            entity_type="agent",
+            entity_id="test_agent",
             variant="baseline",
             overall_score=8.5,
             must_have_pass=True,
@@ -611,6 +613,8 @@ class TestEvaluationResult:
         )
         
         assert result.sample_id == "sample1"
+        assert result.entity_type == "agent"
+        assert result.entity_id == "test_agent"
         assert result.variant == "baseline"
         assert result.overall_score == 8.5
         assert result.must_have_pass is True
@@ -624,6 +628,8 @@ class TestEvaluationResult:
         """测试 EvaluationResult 转换为字典"""
         result = EvaluationResult(
             sample_id="sample1",
+            entity_type="pipeline",
+            entity_id="test_pipeline",
             variant="baseline",
             overall_score=8.5,
             must_have_pass=True,
@@ -635,6 +641,8 @@ class TestEvaluationResult:
         result_dict = result.to_dict()
         
         assert result_dict["sample_id"] == "sample1"
+        assert result_dict["entity_type"] == "pipeline"
+        assert result_dict["entity_id"] == "test_pipeline"
         assert result_dict["variant"] == "baseline"
         assert result_dict["overall_score"] == 8.5
         assert result_dict["must_have_pass"] is True

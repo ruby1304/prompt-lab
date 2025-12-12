@@ -1,0 +1,6 @@
+{"id": 1, "user_message": "我要退款，订单号是12345", "conversation_history": "", "tags": ["refund", "happy_path"], "expected_intent": "退款", "expected_entities": {"订单号": ["12345"]}}
+{"id": 2, "user_message": "你们的产品质量太差了，我昨天买的手机今天就坏了！", "conversation_history": "", "tags": ["complaint", "product_issue"], "expected_intent": "投诉", "expected_entities": {"产品名称": ["手机"], "时间": ["昨天", "今天"]}}
+{"id": 3, "user_message": "请问这款笔记本电脑的配置是什么？", "conversation_history": "", "tags": ["inquiry", "product_info"], "expected_intent": "咨询", "expected_entities": {"产品名称": ["笔记本电脑"]}}
+{"id": 4, "user_message": "我的订单什么时候能发货？订单号是ABC-9876", "conversation_history": "用户：我三天前下的单\n客服：好的，请提供订单号", "tags": ["inquiry", "order_status"], "expected_intent": "咨询", "expected_entities": {"订单号": ["ABC-9876"]}}
+{"id": 5, "user_message": "建议你们增加更多的支付方式，比如支持数字货币支付", "conversation_history": "", "tags": ["suggestion", "payment"], "expected_intent": "建议", "expected_entities": {}}
+{"id": 6, "user_message": "非常感谢你们的帮助，问题已经解决了！", "conversation_history": "用户：我的账号登录不了\n客服：请尝试重置密码\n用户：好的，我试试", "tags": ["thanks", "resolved"], "expected_intent": "感谢", "expected_entities": {}}

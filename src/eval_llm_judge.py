@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -14,9 +15,10 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from .agent_registry import load_agent
 from .config import get_openai_model_name
-from .chains import load_flow_config
+from .chains import load_flow_config, run_flow_with_tokens
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
@@ -104,12 +106,14 @@ def render_case_for_judge(task_agent_cfg, case: Dict[str, Any]) -> str:
 
 
 def build_judge_chain(task_agent_cfg, judge_agent_cfg, judge_flow_name: str):
-    """构建 Judge Chain，使用 JudgeAgent 的 prompt 和 TaskAgent 的业务目标"""
+    """
+    构建 Judge Chain，使用 JudgeAgent 的 prompt 和 TaskAgent 的业务目标
+    
+    注意：这个函数现在主要用于获取配置信息，实际的 chain 构建由 run_flow_with_tokens 处理
+    """
     
     # 1. 读取 judge 的提示词
-    flow_cfg = load_flow_config(judge_flow_name)
-    system_prompt = flow_cfg["system_prompt"]
-    user_template = flow_cfg["user_template"]
+    flow_cfg = load_flow_config(judge_flow_name, agent_id="judge_default")
     
     # 2. 从 TaskAgent evaluation 里拿 scale
     eval_cfg = task_agent_cfg.evaluation or {}
@@ -117,28 +121,18 @@ def build_judge_chain(task_agent_cfg, judge_agent_cfg, judge_flow_name: str):
     min_score = scale.get("min", 0)
     max_score = scale.get("max", 10)
     
-    # 3. 用 min_score/max_score 格式化 system_prompt
-    system_prompt = system_prompt.format(
-        min_score=min_score,
-        max_score=max_score,
-    )
-    
-    # 4. 组装 ChatPromptTemplate
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            ("user", user_template),
-        ]
-    )
-    
-    # 5. Judge 用自己的模型配置
+    # 3. Judge 用自己的模型配置
     eval_model_name = eval_cfg.get("preferred_judge_model")
     model_name = judge_agent_cfg.model or eval_model_name or get_openai_model_name()
     temperature = judge_agent_cfg.temperature if judge_agent_cfg.temperature is not None else eval_cfg.get("temperature", 0.0)
     
-    llm = ChatOpenAI(model=model_name, temperature=temperature)
-    
-    return prompt | llm
+    return {
+        "flow_cfg": flow_cfg,
+        "min_score": min_score,
+        "max_score": max_score,
+        "model_name": model_name,
+        "temperature": temperature
+    }
 
 
 def judge_one(
@@ -146,9 +140,14 @@ def judge_one(
     flow_name: str,
     case: Dict[str, Any],
     output: str,
-    judge_chain,
+    judge_config: Dict[str, Any],
+    judge_flow_name: str,
 ) -> tuple[Dict[str, Any], Dict[str, int]]:
-    """对单个 (case, flow) 调用一次 Judge 模型，返回评估结果和token统计"""
+    """
+    对单个 (case, flow) 调用一次 Judge 模型，返回评估结果和token统计
+    
+    使用 Output Parser 自动解析 JSON 输出，并在解析失败时提供降级处理。
+    """
     
     expectations = task_agent_cfg.expectations or {}
     must_have = "\n".join(expectations.get("must_have", []))
@@ -156,6 +155,10 @@ def judge_one(
     
     # 使用新的 case 渲染功能
     case_rendered = render_case_for_judge(task_agent_cfg, case)
+    
+    # 格式化 min_score 和 max_score
+    min_score = judge_config["min_score"]
+    max_score = judge_config["max_score"]
     
     variables = {
         "agent_id": task_agent_cfg.id,
@@ -171,35 +174,110 @@ def judge_one(
         "expected": case.get("expected", ""),
         "output": output,
         "flow_name": flow_name,
+        "min_score": min_score,
+        "max_score": max_score,
+        "_model_override": judge_config["model_name"],
     }
     
-    resp = judge_chain.invoke(variables)
-    content = resp.content
-    
-    # 提取token统计信息
-    token_info = {}
-    if hasattr(resp, 'usage_metadata') and resp.usage_metadata:
-        usage = resp.usage_metadata
-        token_info = {
-            'input_tokens': usage.get('input_tokens', 0),
-            'output_tokens': usage.get('output_tokens', 0),
-            'total_tokens': usage.get('total_tokens', 0)
-        }
-    elif hasattr(resp, 'response_metadata') and resp.response_metadata:
-        usage = resp.response_metadata.get('token_usage', {})
-        token_info = {
-            'input_tokens': usage.get('prompt_tokens', 0),
-            'output_tokens': usage.get('completion_tokens', 0),
-            'total_tokens': usage.get('total_tokens', 0)
-        }
-    
     try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        # 模型偶尔可能输出非纯 JSON，这里可以再简单兜一层，但先保持简单：
-        raise ValueError(f"Judge 输出非 JSON：{content}")
+        # 使用 run_flow_with_tokens，它会自动使用 output_parser
+        result, token_info, parser_stats = run_flow_with_tokens(
+            flow_name=judge_flow_name,
+            extra_vars=variables,
+            agent_id="judge_default"
+        )
+        
+        # 如果配置了 output_parser，result 已经是解析后的 dict
+        # 否则是字符串，需要手动解析
+        if isinstance(result, dict):
+            data = result
+        else:
+            # 向后兼容：如果没有配置 output_parser，手动解析 JSON
+            try:
+                data = json.loads(result)
+            except json.JSONDecodeError as e:
+                logger.error(f"Judge 输出非 JSON: {result[:200]}...")
+                raise ValueError(f"Judge 输出非 JSON：{result[:100]}...") from e
+        
+        # 验证必需字段
+        _validate_judge_output(data)
+        
+        return data, token_info
+        
+    except Exception as e:
+        # 降级处理：当解析失败且重试耗尽时，返回默认分数和错误信息
+        logger.error(f"Judge 评估失败: {e}", exc_info=True)
+        
+        # 创建降级结果
+        fallback_data = _create_fallback_result(
+            error=str(e),
+            min_score=min_score,
+            max_score=max_score
+        )
+        
+        # Token 信息可能不可用，返回空字典
+        token_info = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        
+        console.print(f"[yellow]警告: Judge 评估失败，使用降级结果。错误: {e}[/yellow]")
+        
+        return fallback_data, token_info
+
+
+def _validate_judge_output(data: Dict[str, Any]) -> None:
+    """
+    验证 Judge 输出包含必需字段
     
-    return data, token_info
+    Args:
+        data: Judge 输出的字典
+        
+    Raises:
+        ValueError: 当缺少必需字段时
+    """
+    required_fields = ["overall_score", "must_have_check", "overall_comment"]
+    missing_fields = [field for field in required_fields if field not in data]
+    
+    if missing_fields:
+        error_msg = (
+            f"Judge 输出缺少必需字段: {', '.join(missing_fields)}。\n"
+            f"期望的字段: {', '.join(required_fields)}\n"
+            f"实际的字段: {', '.join(data.keys())}\n"
+            f"修复建议:\n"
+            f"  1. 检查 Judge prompt 是否明确要求输出这些字段\n"
+            f"  2. 查看 LLM 原始输出是否包含这些字段\n"
+            f"  3. 确认 output_parser 配置的 schema 是否正确"
+        )
+        raise ValueError(error_msg)
+
+
+def _create_fallback_result(
+    error: str,
+    min_score: int = 0,
+    max_score: int = 10
+) -> Dict[str, Any]:
+    """
+    创建降级结果
+    
+    当 Judge 评估失败时，返回一个默认的评估结果。
+    
+    Args:
+        error: 错误信息
+        min_score: 最小分数
+        max_score: 最大分数
+        
+    Returns:
+        降级的评估结果字典
+    """
+    # 使用中等分数作为默认值
+    default_score = (min_score + max_score) / 2.0
+    
+    return {
+        "overall_score": default_score,
+        "must_have_check": [],
+        "nice_to_have_check": [],
+        "overall_comment": f"评估失败，使用降级结果。错误: {error[:200]}",
+        "parse_error": True,
+        "error_message": error
+    }
 
 
 def eval_file(
@@ -274,8 +352,8 @@ def eval_file(
     
     console.print(f"[bold]Flows to evaluate[/]: {', '.join(flow_cols)}")
     
-    # 构建 Judge Chain
-    judge_chain = build_judge_chain(
+    # 获取 Judge 配置
+    judge_config = build_judge_chain(
         task_agent_cfg=task_agent_cfg,
         judge_agent_cfg=judge_agent_cfg,
         judge_flow_name=judge_flow,
@@ -308,7 +386,8 @@ def eval_file(
                 flow_name=flow_name,
                 case=case_base,
                 output=output,
-                judge_chain=judge_chain,
+                judge_config=judge_config,
+                judge_flow_name=judge_flow,
             )
             
             # 累计token统计
@@ -323,6 +402,8 @@ def eval_file(
                 "flow": flow_name,
                 "overall_score": judge_data.get("overall_score"),
                 "overall_comment": judge_data.get("overall_comment", ""),
+                "parse_error": judge_data.get("parse_error", False),
+                "error_message": judge_data.get("error_message", ""),
                 "judge_input_tokens": token_info.get("input_tokens", 0),
                 "judge_output_tokens": token_info.get("output_tokens", 0),
                 "judge_total_tokens": token_info.get("total_tokens", 0),

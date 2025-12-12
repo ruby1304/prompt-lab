@@ -1,0 +1,8 @@
+{
+  "entity_type": "pipeline",
+  "entity_id": "document_summary",
+  "baseline_name": "demo_baseline",
+  "description": "演示脚本创建的基线 (变体: baseline)",
+  "creator": "",
+  "performance_summary": "平均执行时间: 5.85s, total_tokens: 701, success_rate: 100.0%"
+}

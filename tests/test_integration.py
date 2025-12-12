@@ -600,6 +600,8 @@ class TestPipelineEvaluationWorkflow:
         evaluation_results = [
             EvaluationResult(
                 sample_id="sample1",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline",
                 overall_score=8.5,
                 must_have_pass=True,
@@ -609,6 +611,8 @@ class TestPipelineEvaluationWorkflow:
             ),
             EvaluationResult(
                 sample_id="sample2",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline", 
                 overall_score=7.2,
                 must_have_pass=True,
@@ -618,6 +622,8 @@ class TestPipelineEvaluationWorkflow:
             ),
             EvaluationResult(
                 sample_id="sample3",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline",
                 overall_score=9.1,
                 must_have_pass=True,
@@ -662,6 +668,8 @@ class TestPipelineEvaluationWorkflow:
         baseline_results = [
             EvaluationResult(
                 sample_id="sample1",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline",
                 overall_score=8.0,
                 must_have_pass=True,
@@ -669,6 +677,8 @@ class TestPipelineEvaluationWorkflow:
             ),
             EvaluationResult(
                 sample_id="sample2",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline",
                 overall_score=7.5,
                 must_have_pass=True,
@@ -680,6 +690,8 @@ class TestPipelineEvaluationWorkflow:
         variant_results = [
             EvaluationResult(
                 sample_id="sample1",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="variant1",
                 overall_score=8.3,
                 must_have_pass=True,
@@ -687,6 +699,8 @@ class TestPipelineEvaluationWorkflow:
             ),
             EvaluationResult(
                 sample_id="sample2",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="variant1",
                 overall_score=7.8,
                 must_have_pass=True,
@@ -901,6 +915,8 @@ class TestDataFileGeneration:
         eval_results = [
             EvaluationResult(
                 sample_id="sample1",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline",
                 overall_score=8.5,
                 must_have_pass=True,
@@ -909,6 +925,8 @@ class TestDataFileGeneration:
             ),
             EvaluationResult(
                 sample_id="sample2",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline", 
                 overall_score=7.2,
                 must_have_pass=False,

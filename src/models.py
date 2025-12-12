@@ -17,6 +17,73 @@ from datetime import datetime
 
 
 @dataclass
+class OutputParserConfig:
+    """Output Parser 配置"""
+    type: str  # "json" | "pydantic" | "list" | "none"
+    schema: Optional[Dict[str, Any]] = None  # JSON schema
+    pydantic_model: Optional[str] = None  # Pydantic 模型类名
+    retry_on_error: bool = True
+    max_retries: int = 3
+    fix_prompt: Optional[str] = None  # 修复提示词
+    
+    def validate(self) -> List[str]:
+        """验证配置有效性"""
+        errors = []
+        
+        # 验证 type 字段
+        valid_types = ["json", "pydantic", "list", "none"]
+        if not self.type:
+            errors.append("Output parser type 不能为空")
+        elif self.type not in valid_types:
+            errors.append(f"不支持的 output parser 类型: {self.type}，支持的类型: {', '.join(valid_types)}")
+        
+        # 验证 JSON parser 配置
+        if self.type == "json":
+            if self.schema is not None and not isinstance(self.schema, dict):
+                errors.append("JSON schema 必须是字典类型")
+        
+        # 验证 Pydantic parser 配置
+        if self.type == "pydantic":
+            if not self.pydantic_model:
+                errors.append("Pydantic parser 必须指定 pydantic_model")
+        
+        # 验证重试配置
+        if self.max_retries < 0:
+            errors.append("max_retries 必须是非负整数")
+        
+        return errors
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'OutputParserConfig':
+        """从字典创建 OutputParserConfig 实例"""
+        return cls(
+            type=data.get("type", "none"),
+            schema=data.get("schema"),
+            pydantic_model=data.get("pydantic_model"),
+            retry_on_error=data.get("retry_on_error", True),
+            max_retries=data.get("max_retries", 3),
+            fix_prompt=data.get("fix_prompt")
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        result = {"type": self.type}
+        
+        if self.schema is not None:
+            result["schema"] = self.schema
+        if self.pydantic_model is not None:
+            result["pydantic_model"] = self.pydantic_model
+        if not self.retry_on_error:
+            result["retry_on_error"] = self.retry_on_error
+        if self.max_retries != 3:
+            result["max_retries"] = self.max_retries
+        if self.fix_prompt is not None:
+            result["fix_prompt"] = self.fix_prompt
+        
+        return result
+
+
+@dataclass
 class InputSpec:
     """Pipeline 输入字段规范"""
     name: str
@@ -89,6 +156,16 @@ class StepConfig:
     output_key: str = ""
     model_override: Optional[str] = None
     description: str = ""
+    required: bool = True  # 新增：步骤是否必需（如果为False，失败时继续执行）
+    
+    def get_dependencies(self) -> List[str]:
+        """
+        获取此步骤依赖的其他步骤的output_key
+        
+        Returns:
+            依赖的output_key列表
+        """
+        return list(self.input_mapping.values())
     
     def validate(self) -> List[str]:
         """验证步骤配置"""
@@ -230,6 +307,7 @@ class PipelineConfig:
     outputs: List[OutputSpec] = field(default_factory=list)
     baseline: Optional[BaselineConfig] = None
     variants: Dict[str, VariantConfig] = field(default_factory=dict)
+    evaluation_target: Optional[str] = None  # 新增：指定评估目标步骤（默认为最后一步）
 
     def __post_init__(self):
         """标准化配置字段，确保都为模型实例。"""
@@ -292,6 +370,11 @@ class PipelineConfig:
         for output_spec in self.outputs:
             if output_spec.key not in {step.output_key for step in self.steps}:
                 errors.append(f"输出 '{output_spec.key}' 引用了不存在的步骤输出")
+        
+        # 验证 evaluation_target 引用的步骤存在
+        if self.evaluation_target:
+            if self.evaluation_target not in step_ids:
+                errors.append(f"evaluation_target '{self.evaluation_target}' 引用了不存在的步骤")
                 
         # 验证 baseline 配置
         if self.baseline:
@@ -411,7 +494,8 @@ class PipelineConfig:
             steps=steps,
             outputs=outputs,
             baseline=baseline,
-            variants=variants
+            variants=variants,
+            evaluation_target=data.get("evaluation_target")
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -425,6 +509,10 @@ class PipelineConfig:
             "steps": [],
             "outputs": [{"key": out.key, "label": out.label} for out in self.outputs],
         }
+        
+        # 添加 evaluation_target（如果指定）
+        if self.evaluation_target:
+            result["evaluation_target"] = self.evaluation_target
         
         # 处理 steps
         for step in self.steps:
@@ -478,9 +566,148 @@ class PipelineConfig:
 
 
 @dataclass
+class RuleConfig:
+    """规则配置"""
+    name: str
+    type: str  # "contains", "not_contains", "regex", "length", etc.
+    params: Dict[str, Any] = field(default_factory=dict)
+    severity: str = "error"  # "error" | "warning"
+    message: str = ""
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RuleConfig':
+        """从字典创建 RuleConfig 实例"""
+        return cls(
+            name=data.get("name", ""),
+            type=data.get("type", ""),
+            params=data.get("params", {}),
+            severity=data.get("severity", "error"),
+            message=data.get("message", "")
+        )
+
+
+@dataclass
+class CaseFieldConfig:
+    """测试用例字段配置"""
+    key: str
+    label: str = ""
+    section: str = "context"  # "primary_input" | "context" | "meta" | "raw"
+    truncate: Optional[int] = None
+    as_json: bool = False
+    required: bool = False
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CaseFieldConfig':
+        """从字典创建 CaseFieldConfig 实例"""
+        return cls(
+            key=data.get("key", ""),
+            label=data.get("label", ""),
+            section=data.get("section", "context"),
+            truncate=data.get("truncate"),
+            as_json=data.get("as_json", False),
+            required=data.get("required", False)
+        )
+
+
+@dataclass
+class EvaluationConfig:
+    """统一的评估配置，适用于 Agent 和 Pipeline"""
+    
+    # 规则评估
+    rules: List[RuleConfig] = field(default_factory=list)
+    
+    # Judge 评估
+    judge_enabled: bool = False
+    judge_agent_id: Optional[str] = None
+    judge_flow: Optional[str] = None
+    judge_model: Optional[str] = None
+    
+    # 评分范围
+    scale_min: int = 0
+    scale_max: int = 10
+    
+    # 字段配置
+    case_fields: List[CaseFieldConfig] = field(default_factory=list)
+    
+    # 其他配置
+    temperature: float = 0.0
+    preferred_judge_model: Optional[str] = None
+    
+    @classmethod
+    def from_agent_config(cls, agent_config: 'AgentConfig') -> 'EvaluationConfig':
+        """从 Agent 配置创建评估配置"""
+        eval_cfg = agent_config.evaluation or {}
+        
+        # 解析规则配置
+        rules = []
+        for rule_data in eval_cfg.get("rules", []):
+            if isinstance(rule_data, dict):
+                rules.append(RuleConfig.from_dict(rule_data))
+        
+        # 解析字段配置
+        case_fields = []
+        for field_data in eval_cfg.get("case_fields", []):
+            if isinstance(field_data, dict):
+                case_fields.append(CaseFieldConfig.from_dict(field_data))
+        
+        # 获取评分范围
+        scale = eval_cfg.get("scale", {}) or {}
+        scale_min = scale.get("min", 0)
+        scale_max = scale.get("max", 10)
+        
+        # 判断是否启用 Judge
+        judge_enabled = eval_cfg.get("judge_agent_id") is not None or eval_cfg.get("judge_flow") is not None
+        
+        return cls(
+            rules=rules,
+            judge_enabled=judge_enabled,
+            judge_agent_id=eval_cfg.get("judge_agent_id"),
+            judge_flow=eval_cfg.get("judge_flow"),
+            judge_model=eval_cfg.get("judge_model"),
+            scale_min=scale_min,
+            scale_max=scale_max,
+            case_fields=case_fields,
+            temperature=eval_cfg.get("temperature", 0.0),
+            preferred_judge_model=eval_cfg.get("preferred_judge_model")
+        )
+    
+    @classmethod
+    def from_pipeline_config(cls, pipeline_config: 'PipelineConfig') -> 'EvaluationConfig':
+        """从 Pipeline 配置创建评估配置"""
+        # Pipeline 的评估配置通常基于最后一个步骤的 agent
+        # 如果 Pipeline 配置中有评估配置，优先使用
+        # 否则使用最后一个步骤的 agent 配置
+        
+        # 注意：这里需要导入 agent_registry，但为了避免循环导入，
+        # 我们在方法内部导入
+        from .agent_registry import load_agent
+        
+        # 尝试从最后一个步骤获取 agent 配置
+        if pipeline_config.steps:
+            final_step = pipeline_config.steps[-1]
+            try:
+                final_agent = load_agent(final_step.agent)
+                return cls.from_agent_config(final_agent)
+            except Exception:
+                # 如果加载失败，返回默认配置
+                pass
+        
+        # 返回默认配置
+        return cls(
+            rules=[],
+            judge_enabled=False,
+            scale_min=0,
+            scale_max=10,
+            case_fields=[]
+        )
+
+
+@dataclass
 class EvaluationResult:
     """评估结果数据结构"""
     sample_id: str
+    entity_type: str  # "agent" | "pipeline"
+    entity_id: str  # agent_id 或 pipeline_id
     variant: str
     overall_score: float
     must_have_pass: bool
@@ -488,12 +715,15 @@ class EvaluationResult:
     judge_feedback: str = ""
     execution_time: float = 0.0
     step_outputs: Dict[str, Any] = field(default_factory=dict)
+    failed_steps: List[str] = field(default_factory=list)  # 新增：失败步骤的ID列表
     created_at: datetime = field(default_factory=datetime.now)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
         return {
             "sample_id": self.sample_id,
+            "entity_type": self.entity_type,
+            "entity_id": self.entity_id,
             "variant": self.variant,
             "overall_score": self.overall_score,
             "must_have_pass": self.must_have_pass,
@@ -501,6 +731,7 @@ class EvaluationResult:
             "judge_feedback": self.judge_feedback,
             "execution_time": self.execution_time,
             "step_outputs": self.step_outputs,
+            "failed_steps": self.failed_steps,
             "created_at": self.created_at.isoformat()
         }
     
@@ -516,6 +747,8 @@ class EvaluationResult:
                 
         return cls(
             sample_id=data.get("sample_id", ""),
+            entity_type=data.get("entity_type", "agent"),  # 默认为 agent 以保持向后兼容
+            entity_id=data.get("entity_id", ""),
             variant=data.get("variant", ""),
             overall_score=float(data.get("overall_score", 0.0)),
             must_have_pass=bool(data.get("must_have_pass", False)),
@@ -523,6 +756,7 @@ class EvaluationResult:
             judge_feedback=data.get("judge_feedback", ""),
             execution_time=float(data.get("execution_time", 0.0)),
             step_outputs=data.get("step_outputs", {}),
+            failed_steps=data.get("failed_steps", []),
             created_at=created_at
         )
 

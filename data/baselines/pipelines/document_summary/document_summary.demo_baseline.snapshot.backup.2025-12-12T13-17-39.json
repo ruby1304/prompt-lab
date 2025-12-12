@@ -1,0 +1,16 @@
+{
+  "entity_type": "pipeline",
+  "entity_id": "document_summary",
+  "baseline_name": "demo_baseline",
+  "description": "演示脚本创建的基线 (变体: baseline)",
+  "created_at": "2025-12-12T13:16:37.699694",
+  "creator": "unknown",
+  "performance_metrics": {
+    "avg_execution_time": 6.796188116073608,
+    "total_tokens": 701,
+    "success_rate": 1.0
+  },
+  "configuration": {},
+  "evaluation_results": [],
+  "metadata": {}
+}

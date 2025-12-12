@@ -1,0 +1,67 @@
+id: "customer_service_flow"
+name: "客服处理流程"
+description: "自动化客服请求处理：意图识别 → 实体提取 → 回复生成"
+default_testset: "customer_requests.jsonl"
+
+inputs:
+  - name: "user_message"
+    desc: "用户消息"
+    required: true
+  - name: "conversation_history"
+    desc: "对话历史"
+    required: false
+
+steps:
+  - id: "intent_detection"
+    agent: "intent_classifier"
+    flow: "classify_v1"
+    input_mapping:
+      message: "user_message"
+      history: "conversation_history"
+    output_key: "intent"
+    description: "识别用户意图"
+    
+  - id: "entity_extraction"
+    agent: "entity_extractor"
+    flow: "extract_v1"
+    input_mapping:
+      message: "user_message"
+      intent: "intent"
+    output_key: "entities"
+    description: "提取关键实体"
+    
+  - id: "response_generation"
+    agent: "response_generator"
+    flow: "generate_v1"
+    input_mapping:
+      intent: "intent"
+      entities: "entities"
+      history: "conversation_history"
+    output_key: "response"
+    description: "生成客服回复"
+
+outputs:
+  - key: "intent"
+    label: "识别的意图"
+  - key: "entities"
+    label: "提取的实体"
+  - key: "response"
+    label: "生成的回复"
+
+baseline:
+  name: "production_v1"
+  description: "生产环境基线版本"
+  steps:
+    intent_detection:
+      flow: "classify_v1"
+    entity_extraction:
+      flow: "extract_v1"
+    response_generation:
+      flow: "generate_v1"
+
+variants:
+  enhanced_intent:
+    description: "增强意图识别版本（预留）"
+    overrides:
+      intent_detection:
+        flow: "classify_v1"

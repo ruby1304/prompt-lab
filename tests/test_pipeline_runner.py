@@ -13,7 +13,7 @@ from src.pipeline_runner import (
     PipelineExecutionError, create_progress_printer
 )
 from src.models import PipelineConfig, StepConfig
-from src.error_handler import ConfigError, ExecutionError
+from src.error_handler import ConfigurationError as ConfigError, ExecutionError
 
 
 class TestStepResult:
@@ -213,8 +213,11 @@ class TestPipelineRunner:
         assert len(result.step_results) == 2
         assert result.error is None
         assert result.total_execution_time > 0
-        assert "step1_output" in result.final_outputs
+        # Only step2_output is in the outputs config
         assert "step2_output" in result.final_outputs
+        # Verify step results contain both outputs
+        assert result.step_results[0].output_key == "step1_output"
+        assert result.step_results[1].output_key == "step2_output"
     
     def test_execute_sample_with_variant(self, sample_pipeline_config, sample_testset,
                                        mock_load_agent, mock_run_flow_with_tokens):
@@ -243,7 +246,8 @@ class TestPipelineRunner:
         assert result.output_key == "step1_output"
         assert result.error is None
         assert result.execution_time > 0
-        assert "test_flow" in result.output_value
+        # The baseline config overrides to use baseline_flow, not test_flow
+        assert "baseline_flow" in result.output_value
     
     def test_execute_step_with_missing_input(self, sample_pipeline_config, 
                                            mock_load_agent, mock_run_flow_with_tokens):

@@ -1,0 +1,29 @@
+id: "document_summarizer"
+name: "文档摘要助手"
+type: "task"
+description: |
+  负责生成文档的简洁摘要：
+  - 提取文档的核心要点
+  - 保持摘要的连贯性
+  - 控制摘要长度
+  - 保留关键信息
+
+business_goal: |
+  生成高质量的文档摘要，帮助用户快速理解文档内容
+
+expectations:
+  must_have:
+    - 准确提取核心要点
+    - 保持摘要的连贯性
+    - 控制摘要长度在合理范围
+  nice_to_have:
+    - 识别文档的主题和结构
+    - 突出重要信息
+
+flows:
+  - name: "summary_v1"
+    file: "summary_v1.yaml"
+    notes: "基础摘要版本"
+  - name: "summary_v2"
+    file: "summary_v2.yaml"
+    notes: "改进摘要版本，更注重结构化"

@@ -1,0 +1,46 @@
+id: "document_summary"
+name: "文档摘要 Pipeline"
+description: "清理文档内容并生成摘要"
+default_testset: "documents.jsonl"
+
+inputs:
+  - name: "raw_text"
+    desc: "原始文档文本"
+    required: true
+
+steps:
+  - id: "clean"
+    agent: "text_cleaner"
+    flow: "clean_v1"
+    input_mapping:
+      text: "raw_text"
+    output_key: "cleaned_text"
+    description: "清洗文档文本"
+    
+  - id: "summarize"
+    agent: "document_summarizer"
+    flow: "summary_v1"
+    input_mapping:
+      text: "cleaned_text"
+    output_key: "summary"
+    description: "生成文档摘要"
+
+outputs:
+  - key: "summary"
+    label: "文档摘要"
+
+baseline:
+  name: "stable_v1"
+  description: "稳定版本基线"
+  steps:
+    clean:
+      flow: "clean_v1"
+    summarize:
+      flow: "summary_v1"
+
+variants:
+  improved_v1:
+    description: "改进版本，使用更好的摘要算法"
+    overrides:
+      summarize:
+        flow: "summary_v2"

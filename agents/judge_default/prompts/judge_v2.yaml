@@ -102,3 +102,58 @@ user_template: |
   {output}
 
   请根据以上信息进行评估，重点关注对话总结的质量维度，并严格按照 system 中指定的 JSON 结构输出。
+
+output_parser:
+  type: "json"
+  schema:
+    type: "object"
+    properties:
+      summary_quality_check:
+        type: "array"
+        items:
+          type: "object"
+          properties:
+            aspect:
+              type: "string"
+            score:
+              type: "number"
+            satisfied:
+              type: "boolean"
+            comment:
+              type: "string"
+          required: ["aspect", "score", "satisfied"]
+      must_have_check:
+        type: "array"
+        items:
+          type: "object"
+          properties:
+            item:
+              type: "string"
+            satisfied:
+              type: "boolean"
+            score:
+              type: "number"
+            comment:
+              type: "string"
+          required: ["item", "satisfied", "score"]
+      nice_to_have_check:
+        type: "array"
+        items:
+          type: "object"
+          properties:
+            item:
+              type: "string"
+            satisfied:
+              type: "boolean"
+            score:
+              type: "number"
+            comment:
+              type: "string"
+          required: ["item", "satisfied", "score"]
+      overall_score:
+        type: "number"
+      overall_comment:
+        type: "string"
+    required: ["overall_score", "must_have_check", "overall_comment"]
+  retry_on_error: true
+  max_retries: 3

@@ -14,9 +14,16 @@ from src.models import PipelineConfig, StepConfig, BaselineConfig, VariantConfig
 from src.agent_registry import AgentConfig, AgentFlow
 
 
-@pytest.fixture(autouse=True)
+def pytest_configure(config):
+    """注册自定义标记"""
+    config.addinivalue_line(
+        "markers", "integration: mark test as integration test (requires real LLM calls)"
+    )
+
+
+@pytest.fixture
 def _set_default_model_env(monkeypatch):
-    """确保测试运行时不会依赖写死的模型名称。"""
+    """确保测试运行时不会依赖写死的模型名称。仅在需要时手动使用此 fixture。"""
     monkeypatch.setenv("OPENAI_MODEL_NAME", "test-model")
 
 
@@ -157,7 +164,10 @@ def mock_run_flow_with_tokens(monkeypatch):
             "total_tokens": 150
         }
         
-        return outputs.get(flow_name, f"默认输出来自 {flow_name}"), token_usage
+        # Parser stats (None for most cases, can be customized if needed)
+        parser_stats = None
+        
+        return outputs.get(flow_name, f"默认输出来自 {flow_name}"), token_usage, parser_stats
     
     # Patch in multiple locations where run_flow_with_tokens might be imported
     monkeypatch.setattr("src.chains.run_flow_with_tokens", _run_flow)

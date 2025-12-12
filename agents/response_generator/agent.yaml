@@ -1,0 +1,26 @@
+id: "response_generator"
+name: "回复生成助手"
+type: "task"
+description: |
+  负责生成客服回复：
+  - 根据意图和实体生成合适的回复
+  - 保持专业和友好的语气
+  - 提供有用的信息和建议
+  - 引导用户完成操作
+
+business_goal: |
+  生成高质量的客服回复，提升用户满意度
+
+expectations:
+  must_have:
+    - 回复与用户意图匹配
+    - 语气专业友好
+    - 提供清晰的指引
+  nice_to_have:
+    - 个性化回复
+    - 预测用户后续需求
+
+flows:
+  - name: "generate_v1"
+    file: "generate_v1.yaml"
+    notes: "基础回复生成"

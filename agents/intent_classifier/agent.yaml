@@ -1,0 +1,26 @@
+id: "intent_classifier"
+name: "意图识别助手"
+type: "task"
+description: |
+  负责识别用户消息的意图：
+  - 分析用户的请求类型
+  - 识别用户的真实需求
+  - 分类常见的客服场景
+  - 为后续处理提供意图标签
+
+business_goal: |
+  准确识别用户意图，为客服流程提供决策依据
+
+expectations:
+  must_have:
+    - 准确识别常见意图类型
+    - 输出标准化的意图标签
+    - 处理模糊或复杂的请求
+  nice_to_have:
+    - 识别用户情绪
+    - 检测紧急程度
+
+flows:
+  - name: "classify_v1"
+    file: "classify_v1.yaml"
+    notes: "基础意图分类"

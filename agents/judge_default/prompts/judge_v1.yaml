@@ -76,3 +76,60 @@ user_template: |
   {output}
 
   请根据以上信息进行评估，并严格按照 system 中指定的 JSON 结构输出。
+
+output_parser:
+  type: "json"
+  schema:
+    type: "object"
+    properties:
+      derived_criteria:
+        type: "array"
+        items:
+          type: "object"
+          properties:
+            id:
+              type: "string"
+            name:
+              type: "string"
+            from:
+              type: "string"
+            importance:
+              type: "string"
+            comment:
+              type: "string"
+          required: ["id", "name", "from", "importance"]
+      must_have_check:
+        type: "array"
+        items:
+          type: "object"
+          properties:
+            item:
+              type: "string"
+            satisfied:
+              type: "boolean"
+            score:
+              type: "number"
+            comment:
+              type: "string"
+          required: ["item", "satisfied", "score"]
+      nice_to_have_check:
+        type: "array"
+        items:
+          type: "object"
+          properties:
+            item:
+              type: "string"
+            satisfied:
+              type: "boolean"
+            score:
+              type: "number"
+            comment:
+              type: "string"
+          required: ["item", "satisfied", "score"]
+      overall_score:
+        type: "number"
+      overall_comment:
+        type: "string"
+    required: ["overall_score", "must_have_check", "overall_comment"]
+  retry_on_error: true
+  max_retries: 3

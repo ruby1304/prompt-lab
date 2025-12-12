@@ -753,14 +753,256 @@ result = profile_function(
 )
 ```
 
+## Output Parser 相关问题
+
+### 问题 1: Output Parser 解析失败
+
+**错误信息**:
+```
+OutputParserException: Invalid JSON output
+```
+
+**原因**: LLM 输出格式不符合预期
+
+**解决方案**:
+```yaml
+# 1. 改进 Prompt，明确输出格式
+system_prompt: |
+  你是一个助手，请以 JSON 格式输出结果。
+  
+  重要：
+  - 只输出 JSON，不要有任何其他文字
+  - 不要输出 "```json" 或 "```"
+  - 确保 JSON 格式正确
+  
+  输出示例：
+  {"field1": "value1", "field2": 123}
+
+# 2. 降低 temperature 提高稳定性
+temperature: 0.3
+
+# 3. 启用重试机制
+output_parser:
+  type: "json"
+  retry_on_error: true
+  max_retries: 3
+```
+
+### 问题 2: 返回类型不对
+
+**症状**: 期望返回 dict，但返回了 str
+
+**原因**: 没有配置 output_parser 或配置错误
+
+**解决方案**:
+```python
+# 1. 检查配置
+from src.config import load_flow_config
+
+flow_cfg = load_flow_config("my_agent", "my_flow")
+print(flow_cfg.get("output_parser"))  # 应该有值
+
+# 2. 验证配置
+from src.output_parser import OutputParserConfig
+
+if "output_parser" in flow_cfg:
+    parser_cfg = OutputParserConfig(**flow_cfg["output_parser"])
+    parser_cfg.validate()  # 检查配置是否有效
+```
+
+### 问题 3: Judge Agent 评分不稳定
+
+**症状**: Judge Agent 的评分结果不一致
+
+**原因**: Judge 输出格式不稳定或没有使用 Output Parser
+
+**解决方案**:
+```yaml
+# agents/judge_default/prompts/judge_v2.yaml
+name: "judge_v2"
+
+system_prompt: |
+  你是评估助手，请严格按照 JSON 格式输出。
+  只输出 JSON，不要有其他文字。
+
+temperature: 0.3  # 降低 temperature
+
+output_parser:
+  type: "json"
+  schema:
+    type: "object"
+    properties:
+      overall_score: {type: "number"}
+      must_have_check: {type: "array"}
+      overall_comment: {type: "string"}
+    required: ["overall_score", "must_have_check", "overall_comment"]
+  retry_on_error: true
+  max_retries: 3
+```
+
+### 问题 4: Output Parser 性能下降
+
+**症状**: 使用 Parser 后执行时间明显增加
+
+**原因**: 重试次数过多或解析失败率高
+
+**解决方案**:
+```yaml
+# 1. 减少重试次数
+output_parser:
+  max_retries: 1  # 从 3 减少到 1
+
+# 2. 优化 Prompt 提高成功率
+system_prompt: |
+  # 更明确的指令...
+
+# 3. 使用更简单的 Parser
+output_parser:
+  type: "json"  # 而不是 pydantic
+```
+
+## Pipeline 相关问题
+
+### 问题 1: Pipeline 步骤执行失败
+
+**错误信息**:
+```
+PipelineExecutionError: Step 'clean' failed: Agent 'text_cleaner' not found
+```
+
+**原因**: 引用的 Agent 不存在
+
+**解决方案**:
+```bash
+# 1. 检查 Agent 是否存在
+ls -la agents/text_cleaner/
+
+# 2. 检查 Pipeline 配置
+cat pipelines/my_pipeline.yaml
+
+# 3. 验证所有引用的 Agent
+python -c "
+from src.pipeline_config import load_pipeline_config
+pipeline = load_pipeline_config('my_pipeline')
+for step in pipeline.steps:
+    print(f'Step {step.id}: agent={step.agent}, flow={step.flow}')
+"
+```
+
+### 问题 2: Pipeline 数据传递错误
+
+**症状**: 步骤间数据传递不正确
+
+**原因**: input_mapping 配置错误
+
+**解决方案**:
+```yaml
+# 检查 input_mapping 配置
+steps:
+  - id: "step1"
+    agent: "agent1"
+    flow: "flow1"
+    input_mapping:
+      text: "raw_text"  # 从测试集字段映射
+    output_key: "step1_output"
+    
+  - id: "step2"
+    agent: "agent2"
+    flow: "flow2"
+    input_mapping:
+      text: "step1_output"  # 从前序步骤输出映射
+    output_key: "step2_output"
+```
+
+### 问题 3: Pipeline 循环依赖
+
+**错误信息**:
+```
+ConfigValidationError: Circular dependency detected: step1 -> step2 -> step1
+```
+
+**原因**: 步骤间存在循环依赖
+
+**解决方案**:
+```yaml
+# 检查并修复依赖关系
+# ❌ 错误：循环依赖
+steps:
+  - id: "step1"
+    input_mapping:
+      text: "step2_output"  # 依赖 step2
+    output_key: "step1_output"
+    
+  - id: "step2"
+    input_mapping:
+      text: "step1_output"  # 依赖 step1
+    output_key: "step2_output"
+
+# ✅ 正确：线性依赖
+steps:
+  - id: "step1"
+    input_mapping:
+      text: "raw_text"  # 从测试集
+    output_key: "step1_output"
+    
+  - id: "step2"
+    input_mapping:
+      text: "step1_output"  # 从 step1
+    output_key: "step2_output"
+```
+
+### 问题 4: Pipeline 评估失败
+
+**症状**: Pipeline 执行成功但评估失败
+
+**原因**: 评估配置错误或 Judge Agent 问题
+
+**解决方案**:
+```yaml
+# 1. 检查评估配置
+evaluation:
+  rules:
+    - type: "length"
+      field: "summary"  # 确保字段存在
+      min: 10
+  judge:
+    enabled: true
+    agent: "judge_default"  # 确保 Agent 存在
+    flow: "judge_v2"        # 确保 Flow 存在
+
+# 2. 测试 Judge Agent
+python -m src eval --agent judge_default --flows judge_v2 --limit 1
+```
+
 ## 获取帮助
 
 如果以上解决方案都无法解决您的问题，请：
 
 1. **检查日志**: 启用详细日志记录，查看具体错误信息
+   ```bash
+   export LOG_LEVEL=DEBUG
+   python -m src eval --agent my_agent --flows my_flow --limit 1
+   ```
+
 2. **最小化复现**: 创建最小的测试用例来复现问题
+   ```python
+   # 最小测试用例
+   from src.chains import run_flow
+   
+   result = run_flow(
+       flow_name="my_flow",
+       agent_id="my_agent",
+       extra_vars={'input': 'test'}
+   )
+   print(result)
+   ```
+
 3. **收集信息**: 记录错误信息、环境信息、操作步骤
-4. **查看文档**: 参考 README.md 和 USAGE_GUIDE.md
+4. **查看文档**: 参考相关文档
+   - [README.md](../README.md) - 快速开始
+   - [系统架构](ARCHITECTURE.md) - 架构说明
+   - [Pipeline 配置指南](reference/pipeline-guide.md) - Pipeline 详细配置
+   - [Output Parser 使用指南](../OUTPUT_PARSER_USAGE.md) - Output Parser 配置
 5. **提交 Issue**: 在项目仓库中创建详细的问题报告
 
 ### 问题报告模板

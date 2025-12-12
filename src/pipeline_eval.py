@@ -19,12 +19,13 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .models import (
-    PipelineConfig, EvaluationResult, ComparisonReport, RegressionCase
+    PipelineConfig, EvaluationResult, EvaluationConfig, ComparisonReport, RegressionCase
 )
 from .pipeline_runner import PipelineRunner, PipelineResult
 from .agent_registry import load_agent
 from .eval_rules import apply_rules_to_row
 from .eval_llm_judge import judge_one, build_judge_chain
+from .unified_evaluator import UnifiedEvaluator
 from .data_manager import get_pipeline_evals_dir, get_pipeline_runs_dir
 from .paths import ensure_pipeline_dirs
 
@@ -119,31 +120,28 @@ class PipelineEvaluator:
         # 准备评估结果
         evaluation_results = []
         
-        # 获取最终步骤的 agent 配置（用于规则和 judge 评估）
-        final_step = self.config.steps[-1] if self.config.steps else None
-        final_agent = None
-        judge_chain = None
-        
-        if final_step and (apply_rules or apply_judge):
+        # 创建统一评估器
+        evaluator = None
+        if apply_rules or apply_judge:
             try:
-                final_agent = load_agent(final_step.agent)
+                # 从 pipeline 配置创建评估配置
+                eval_config = EvaluationConfig.from_pipeline_config(self.config)
                 
-                # 构建 judge chain（如果需要）
-                if apply_judge:
-                    eval_cfg = final_agent.evaluation or {}
-                    judge_agent_id = judge_agent_id or eval_cfg.get("judge_agent_id", "judge_default")
-                    judge_flow = judge_flow or eval_cfg.get("judge_flow", "judge_v1")
-                    
-                    try:
-                        judge_agent = load_agent(judge_agent_id)
-                        judge_chain = build_judge_chain(final_agent, judge_agent, judge_flow)
-                        logger.info(f"使用 Judge: {judge_agent_id}/{judge_flow}")
-                    except Exception as e:
-                        logger.warning(f"构建 Judge chain 失败: {e}")
-                        apply_judge = False
-                        
+                # 如果指定了 judge_agent_id 或 judge_flow，覆盖配置
+                if judge_agent_id:
+                    eval_config.judge_agent_id = judge_agent_id
+                if judge_flow:
+                    eval_config.judge_flow = judge_flow
+                
+                # 根据参数设置是否启用 judge
+                if not apply_judge:
+                    eval_config.judge_enabled = False
+                
+                evaluator = UnifiedEvaluator(eval_config)
+                logger.info(f"使用统一评估器: rules={apply_rules}, judge={apply_judge}")
+                
             except Exception as e:
-                logger.warning(f"加载最终步骤 agent 失败: {e}")
+                logger.warning(f"创建统一评估器失败: {e}")
                 apply_rules = False
                 apply_judge = False
         
@@ -158,6 +156,8 @@ class PipelineEvaluator:
             if pipeline_result.error:
                 eval_result = EvaluationResult(
                     sample_id=sample_id,
+                    entity_type="pipeline",
+                    entity_id=self.config.id,
                     variant=variant,
                     overall_score=0.0,
                     must_have_pass=False,
@@ -172,55 +172,52 @@ class PipelineEvaluator:
                 # 使用第一个输出作为评估对象
                 final_output = str(list(pipeline_result.final_outputs.values())[0])
             
-            # 初始化评估结果
-            eval_result = EvaluationResult(
-                sample_id=sample_id,
-                variant=variant,
-                overall_score=0.0,
-                must_have_pass=True,
-                execution_time=pipeline_result.total_execution_time,
-                step_outputs=pipeline_result.final_outputs
-            )
-            
-            # 应用规则评估
-            if apply_rules and final_agent:
+            # 使用统一评估器评估
+            if evaluator:
                 try:
-                    rule_result = apply_rules_to_row(
-                        final_agent, 
-                        {"output": final_output}, 
-                        "output"
-                    )
-                    eval_result.must_have_pass = bool(rule_result.get("rule_pass", 1))
-                    rule_violations = rule_result.get("rule_violations", "")
-                    if rule_violations:
-                        eval_result.rule_violations = [v.strip() for v in rule_violations.split(",") if v.strip()]
-                except Exception as e:
-                    logger.warning(f"样本 {sample_id} 规则评估失败: {e}")
-            
-            # 应用 LLM judge 评估
-            if apply_judge and judge_chain and final_agent:
-                try:
-                    judge_data, token_info = judge_one(
-                        task_agent_cfg=final_agent,
-                        flow_name=final_step.flow,
-                        case=sample,
-                        output=final_output,
-                        judge_chain=judge_chain
+                    # 获取所有步骤的输出字典
+                    step_outputs_dict = pipeline_result.get_step_outputs_dict()
+                    
+                    # 获取失败的步骤
+                    failed_steps = [step.step_id for step in pipeline_result.get_failed_steps()]
+                    
+                    eval_result = evaluator.evaluate_pipeline_output(
+                        pipeline_id=self.config.id,
+                        variant=variant,
+                        test_case=sample,
+                        step_outputs=step_outputs_dict,
+                        final_output=final_output,
+                        execution_time=pipeline_result.total_execution_time,
+                        evaluation_target=self.config.evaluation_target
                     )
                     
-                    eval_result.overall_score = float(judge_data.get("overall_score", 0.0))
-                    eval_result.judge_feedback = judge_data.get("overall_comment", "")
-                    
-                    # 检查 must_have 要求
-                    must_have_checks = judge_data.get("must_have_check", [])
-                    if must_have_checks:
-                        eval_result.must_have_pass = all(
-                            check.get("satisfied", False) for check in must_have_checks
-                        )
-                    
+                    # 添加失败步骤信息
+                    eval_result.failed_steps = failed_steps
                 except Exception as e:
-                    logger.warning(f"样本 {sample_id} Judge 评估失败: {e}")
-                    eval_result.judge_feedback = f"Judge 评估失败: {str(e)}"
+                    logger.warning(f"样本 {sample_id} 评估失败: {e}")
+                    eval_result = EvaluationResult(
+                        sample_id=sample_id,
+                        entity_type="pipeline",
+                        entity_id=self.config.id,
+                        variant=variant,
+                        overall_score=0.0,
+                        must_have_pass=False,
+                        execution_time=pipeline_result.total_execution_time,
+                        step_outputs=pipeline_result.final_outputs,
+                        judge_feedback=f"评估失败: {str(e)}"
+                    )
+            else:
+                # 如果没有评估器，创建基本的评估结果
+                eval_result = EvaluationResult(
+                    sample_id=sample_id,
+                    entity_type="pipeline",
+                    entity_id=self.config.id,
+                    variant=variant,
+                    overall_score=0.0,
+                    must_have_pass=True,
+                    execution_time=pipeline_result.total_execution_time,
+                    step_outputs=pipeline_result.final_outputs
+                )
             
             evaluation_results.append(eval_result)
         

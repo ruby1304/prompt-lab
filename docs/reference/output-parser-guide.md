@@ -644,7 +644,7 @@ output_parser:
 - [系统架构文档](../ARCHITECTURE.md) - 了解 Output Parser 在系统中的位置
 - [Pipeline 配置指南](pipeline-guide.md) - Pipeline 中使用 Output Parser
 - [评估模式指南](eval-modes-guide.md) - Judge Agent 使用 Output Parser
-- [OUTPUT_PARSER_USAGE.md](../../OUTPUT_PARSER_USAGE.md) - 快速开始指南
+- [OUTPUT_PARSER_USAGE.md](../guides/output-parser-usage.md) - 快速开始指南
 
 ## 示例代码
 

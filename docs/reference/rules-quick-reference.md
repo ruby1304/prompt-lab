@@ -117,5 +117,5 @@ rules:
 
 ## 📖 详细文档
 
-- [EVALUATION_RULES.md](EVALUATION_RULES.md) - 完整的规则类型说明
-- [MANUAL_EVAL_GUIDE.md](MANUAL_EVAL_GUIDE.md) - 完整的评估系统指南
+- [EVALUATION_RULES.md](evaluation-rules.md) - 完整的规则类型说明
+- [MANUAL_EVAL_GUIDE.md](manual-eval-guide.md) - 完整的评估系统指南

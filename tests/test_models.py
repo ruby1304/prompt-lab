@@ -199,7 +199,7 @@ class TestStepConfig:
         
         assert len(errors) >= 3
         assert any("步骤 ID 不能为空" in error for error in errors)
-        assert any("Agent ID 不能为空" in error for error in errors)
+        assert any("agent 字段不能为空" in error for error in errors)
         assert any("输出键不能为空" in error for error in errors)
     
     def test_step_config_validate_invalid_input_mapping(self):

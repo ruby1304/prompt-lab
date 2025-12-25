@@ -1,0 +1,2 @@
+[console_scripts]
+prompt-lab = src.__main__:app

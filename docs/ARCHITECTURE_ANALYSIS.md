@@ -170,7 +170,7 @@ output_parser:
 ```
 
 **参考文档**：
-- [Output Parser 使用指南](../OUTPUT_PARSER_USAGE.md)
+- [Output Parser 使用指南](guides/output-parser-usage.md)
 - [Output Parser 详细指南](reference/output-parser-guide.md)
 
 ---

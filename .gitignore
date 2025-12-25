@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.test
+.env.local
+.env.*.local
 outputs/
 
 # 运行产生的中间结果（不进Git）
@@ -14,6 +17,16 @@ data/testsets/
 # 临时文件
 *.tmp.csv
 *.log
+
+# 测试输出和缓存
+tests/output/
+tests/.cache/
+tests/test_run.log
+.pytest_cache/
+.hypothesis/
+htmlcov/
+.coverage
+coverage.xml
 
 # IDE和编辑器文件
 .vscode/

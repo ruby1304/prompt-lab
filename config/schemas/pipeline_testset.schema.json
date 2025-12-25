@@ -1,0 +1,245 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prompt-lab.io/schemas/pipeline-testset-v2.json",
+  "title": "Pipeline Testset Format",
+  "description": "Schema for Pipeline-level test cases supporting multi-step, batch processing, and aggregation",
+  "version": "2.0",
+  "type": "object",
+  "required": ["id"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the test case",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "examples": [
+        "test_sentiment_basic",
+        "batch_processing_001",
+        "multi_step_pipeline_complex"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "description": "Tags for categorizing and filtering test cases",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "default": [],
+      "examples": [
+        ["sentiment", "batch", "critical"],
+        ["multi-step", "integration"]
+      ]
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Global inputs for the pipeline (initial step inputs)",
+      "default": {},
+      "additionalProperties": true,
+      "examples": [
+        {
+          "text": "Sample input text",
+          "language": "en"
+        }
+      ]
+    },
+    "step_inputs": {
+      "type": "object",
+      "description": "Step-specific inputs, keyed by step ID",
+      "default": {},
+      "additionalProperties": {
+        "type": "object",
+        "description": "Input parameters for a specific step",
+        "additionalProperties": true
+      },
+      "examples": [
+        {
+          "preprocess": {
+            "mode": "strict",
+            "lowercase": true
+          },
+          "analyze": {
+            "depth": "deep"
+          }
+        }
+      ]
+    },
+    "batch_items": {
+      "type": ["array", "null"],
+      "description": "List of items for batch processing steps",
+      "items": {
+        "type": "object",
+        "description": "Individual batch item",
+        "additionalProperties": true
+      },
+      "default": null,
+      "examples": [
+        [
+          {"text": "Item 1", "rating": 5},
+          {"text": "Item 2", "rating": 3}
+        ]
+      ]
+    },
+    "expected_outputs": {
+      "type": "object",
+      "description": "Expected final outputs from the pipeline",
+      "default": {},
+      "additionalProperties": true,
+      "examples": [
+        {
+          "sentiment": "positive",
+          "confidence": 0.95
+        }
+      ]
+    },
+    "expected_aggregation": {
+      "description": "Expected result from batch aggregation step",
+      "default": null,
+      "examples": [
+        {
+          "total_items": 10,
+          "average_score": 4.2,
+          "distribution": {
+            "positive": 7,
+            "negative": 3
+          }
+        }
+      ]
+    },
+    "intermediate_expectations": {
+      "type": "object",
+      "description": "Expected outputs from intermediate steps, keyed by step ID",
+      "default": {},
+      "additionalProperties": {
+        "type": "object",
+        "description": "Expected output for a specific intermediate step",
+        "additionalProperties": true
+      },
+      "examples": [
+        {
+          "preprocess": {
+            "cleaned_text": "sample text",
+            "token_count": 2
+          },
+          "analyze": {
+            "sentiment_score": 0.8
+          }
+        }
+      ]
+    },
+    "evaluation_config": {
+      "type": "object",
+      "description": "Configuration for how to evaluate test results",
+      "default": {},
+      "properties": {
+        "evaluate_intermediate": {
+          "type": "boolean",
+          "description": "Whether to evaluate intermediate step outputs",
+          "default": false
+        },
+        "evaluate_final": {
+          "type": "boolean",
+          "description": "Whether to evaluate final pipeline output",
+          "default": true
+        },
+        "evaluate_aggregation": {
+          "type": "boolean",
+          "description": "Whether to evaluate aggregation results",
+          "default": true
+        },
+        "strict_mode": {
+          "type": "boolean",
+          "description": "Strict mode (exact match) vs loose mode (partial match)",
+          "default": false
+        },
+        "tolerance": {
+          "type": "number",
+          "description": "Tolerance for numerical comparisons",
+          "minimum": 0,
+          "default": 0.01
+        },
+        "ignore_fields": {
+          "type": "array",
+          "description": "Fields to ignore during evaluation",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": [],
+          "examples": [
+            ["timestamp", "request_id", "processing_time"]
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "id": "simple_test_1",
+      "tags": ["simple"],
+      "inputs": {
+        "text": "Test input"
+      },
+      "expected_outputs": {
+        "result": "processed"
+      }
+    },
+    {
+      "id": "multi_step_test_1",
+      "tags": ["multi-step", "integration"],
+      "inputs": {
+        "text": "Complex input text"
+      },
+      "step_inputs": {
+        "preprocess": {
+          "lowercase": true
+        },
+        "analyze": {
+          "model": "advanced"
+        }
+      },
+      "intermediate_expectations": {
+        "preprocess": {
+          "cleaned_text": "complex input text"
+        }
+      },
+      "expected_outputs": {
+        "sentiment": "neutral"
+      },
+      "evaluation_config": {
+        "evaluate_intermediate": true,
+        "strict_mode": false
+      }
+    },
+    {
+      "id": "batch_test_1",
+      "tags": ["batch", "aggregation"],
+      "batch_items": [
+        {"review": "Great!", "rating": 5},
+        {"review": "Poor", "rating": 2}
+      ],
+      "expected_aggregation": {
+        "total_reviews": 2,
+        "average_rating": 3.5
+      },
+      "expected_outputs": {
+        "overall_sentiment": "mixed"
+      }
+    }
+  ],
+  "definitions": {
+    "step_id": {
+      "type": "string",
+      "description": "Identifier for a pipeline step",
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "tag": {
+      "type": "string",
+      "description": "Tag for categorizing test cases",
+      "minLength": 1
+    }
+  }
+}

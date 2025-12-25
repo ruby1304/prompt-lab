@@ -115,6 +115,51 @@ class ProgressTracker:
         """添加进度更新回调函数"""
         self._callbacks.append(callback)
     
+    def get_stats(self) -> ProgressStats:
+        """
+        获取当前进度统计信息（线程安全）
+        
+        Returns:
+            ProgressStats: 进度统计信息的副本
+        """
+        with self._lock:
+            # 返回一个副本，避免外部修改
+            return ProgressStats(
+                total_items=self.stats.total_items,
+                completed_items=self.stats.completed_items,
+                failed_items=self.stats.failed_items,
+                start_time=self.stats.start_time,
+                current_item=self.stats.current_item,
+                current_step=self.stats.current_step
+            )
+    
+    def get_stats_dict(self) -> Dict[str, Any]:
+        """
+        获取当前进度统计信息的字典表示（用于API等场景）
+        
+        Returns:
+            Dict[str, Any]: 进度统计信息字典
+        """
+        stats = self.get_stats()
+        result = {
+            "total_items": stats.total_items,
+            "completed_items": stats.completed_items,
+            "failed_items": stats.failed_items,
+            "success_items": stats.success_items,
+            "progress_percentage": stats.progress_percentage,
+            "elapsed_time": stats.elapsed_time.total_seconds(),
+            "current_item": stats.current_item,
+            "current_step": stats.current_step
+        }
+        
+        # 添加预估时间（如果可用）
+        if stats.estimated_remaining_time:
+            result["estimated_remaining_time"] = stats.estimated_remaining_time.total_seconds()
+        if stats.estimated_completion_time:
+            result["estimated_completion_time"] = stats.estimated_completion_time.isoformat()
+        
+        return result
+    
     def start(self):
         """开始进度跟踪"""
         if self.progress is None:
@@ -344,6 +389,22 @@ class PipelineProgressTracker(ProgressTracker):
             current_step=current_step,
             failed=failed
         )
+    
+    def get_pipeline_stats_dict(self) -> Dict[str, Any]:
+        """
+        获取 Pipeline 专用的进度统计信息字典
+        
+        Returns:
+            Dict[str, Any]: Pipeline 进度统计信息字典
+        """
+        base_stats = self.get_stats_dict()
+        base_stats.update({
+            "pipeline_name": self.pipeline_name,
+            "variant": self.variant,
+            "total_steps": self.total_steps,
+            "current_sample_step": self.current_sample_step
+        })
+        return base_stats
 
 
 class EvaluationProgressTracker(ProgressTracker):

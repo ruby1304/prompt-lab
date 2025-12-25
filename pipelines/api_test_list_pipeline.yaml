@@ -1,0 +1,20 @@
+default_testset: ''
+description: For list testing
+id: api_test_list_pipeline
+inputs:
+- desc: Input
+  name: in
+  required: true
+name: List Test
+outputs:
+- key: out
+  label: Output
+steps:
+- agent: judge_default
+  flow: judge_v1
+  id: s1
+  input_mapping:
+    x: in
+  output_key: out
+  type: agent_flow
+version: 1.0.0

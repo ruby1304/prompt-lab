@@ -1,0 +1,10 @@
+{"id": "positive_basic", "tags": ["sentiment", "positive", "basic"], "inputs": {"text": "I love this product!"}, "expected_outputs": {"sentiment": "positive", "confidence": 0.9}}
+{"id": "negative_basic", "tags": ["sentiment", "negative", "basic"], "inputs": {"text": "This is terrible"}, "expected_outputs": {"sentiment": "negative", "confidence": 0.85}}
+{"id": "neutral_basic", "tags": ["sentiment", "neutral", "basic"], "inputs": {"text": "It's okay"}, "expected_outputs": {"sentiment": "neutral", "confidence": 0.6}}
+{"id": "positive_strong", "tags": ["sentiment", "positive", "strong"], "inputs": {"text": "Absolutely amazing! Best purchase ever!"}, "expected_outputs": {"sentiment": "positive", "confidence": 0.95}}
+{"id": "negative_strong", "tags": ["sentiment", "negative", "strong"], "inputs": {"text": "Worst experience ever. Complete waste of money."}, "expected_outputs": {"sentiment": "negative", "confidence": 0.95}}
+{"id": "mixed_sentiment", "tags": ["sentiment", "mixed"], "inputs": {"text": "Good quality but too expensive"}, "expected_outputs": {"sentiment": "mixed"}}
+{"id": "edge_empty", "tags": ["edge", "error"], "inputs": {"text": ""}, "expected_outputs": {"error": "empty_input"}}
+{"id": "edge_very_short", "tags": ["edge"], "inputs": {"text": "OK"}, "expected_outputs": {"sentiment": "neutral"}}
+{"id": "positive_with_emoji", "tags": ["sentiment", "positive", "emoji"], "inputs": {"text": "Love it! 😍❤️"}, "expected_outputs": {"sentiment": "positive"}}
+{"id": "sarcasm_detection", "tags": ["sentiment", "sarcasm", "advanced"], "inputs": {"text": "Oh great, another broken product. Just what I needed."}, "expected_outputs": {"sentiment": "negative", "sarcasm_detected": true}}

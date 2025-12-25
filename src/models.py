@@ -81,6 +81,16 @@ class OutputParserConfig:
             result["fix_prompt"] = self.fix_prompt
         
         return result
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'OutputParserConfig':
+        """从 JSON 字符串创建 OutputParserConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -113,6 +123,16 @@ class InputSpec:
             "desc": self.desc,
             "required": self.required
         }
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'InputSpec':
+        """从 JSON 字符串创建 InputSpec 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -143,20 +163,133 @@ class OutputSpec:
             "key": self.key,
             "label": self.label
         }
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'OutputSpec':
+        """从 JSON 字符串创建 OutputSpec 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
+
+
+@dataclass
+class CodeNodeConfig:
+    """代码节点配置"""
+    language: str  # "javascript" or "python"
+    code: Optional[str] = None  # 内联代码
+    code_file: Optional[str] = None  # 外部文件路径
+    timeout: int = 30
+    env_vars: Dict[str, str] = field(default_factory=dict)
+    
+    def validate(self) -> List[str]:
+        """验证代码节点配置"""
+        errors = []
+        
+        # 验证 language 字段
+        valid_languages = ["javascript", "python"]
+        if not self.language:
+            errors.append("代码节点的 language 字段不能为空")
+        elif self.language not in valid_languages:
+            errors.append(
+                f"不支持的代码语言: {self.language}，"
+                f"支持的语言: {', '.join(valid_languages)}"
+            )
+        
+        # 验证必须指定 code 或 code_file 之一
+        if not self.code and not self.code_file:
+            errors.append("代码节点必须指定 code（内联代码）或 code_file（外部文件）之一")
+        
+        # 验证不能同时指定 code 和 code_file
+        if self.code and self.code_file:
+            errors.append("代码节点不能同时指定 code 和 code_file，请只使用其中一个")
+        
+        # 验证 timeout
+        if self.timeout <= 0:
+            errors.append("代码节点的 timeout 必须是正整数")
+        
+        return errors
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CodeNodeConfig':
+        """从字典创建 CodeNodeConfig 实例"""
+        return cls(
+            language=data.get("language", ""),
+            code=data.get("code"),
+            code_file=data.get("code_file"),
+            timeout=data.get("timeout", 30),
+            env_vars=data.get("env_vars", {})
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        result = {
+            "language": self.language,
+            "timeout": self.timeout
+        }
+        if self.code is not None:
+            result["code"] = self.code
+        if self.code_file is not None:
+            result["code_file"] = self.code_file
+        if self.env_vars:
+            result["env_vars"] = self.env_vars
+        return result
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'CodeNodeConfig':
+        """从 JSON 字符串创建 CodeNodeConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
 class StepConfig:
-    """Pipeline 步骤配置"""
+    """Pipeline 步骤配置（增强版，支持代码节点）"""
     id: str
-    type: str = "agent_flow"  # 目前只支持 agent_flow，未来可扩展
+    type: str = "agent_flow"  # "agent_flow", "code_node", "batch_aggregator"
+    
+    # Agent Flow 字段
     agent: str = ""
     flow: str = ""
+    
+    # Code Node 字段
+    code_config: Optional[CodeNodeConfig] = None
+    language: Optional[str] = None  # 向后兼容：直接在 step 中指定 language
+    code: Optional[str] = None  # 向后兼容：直接在 step 中指定 code
+    code_file: Optional[str] = None  # 向后兼容：直接在 step 中指定 code_file
+    
+    # 批量处理字段
+    batch_mode: bool = False
+    batch_size: int = 10
+    concurrent: bool = True  # 批量处理时是否并发执行
+    max_workers: int = 4  # 最大并发工作线程数
+    
+    # 聚合字段
+    aggregation_strategy: Optional[str] = None  # "concat", "stats", "filter", "group", "summary", "custom"
+    aggregation_code: Optional[str] = None
+    separator: Optional[str] = None  # concat 策略的分隔符
+    fields: Optional[List[str]] = None  # stats 策略的字段列表
+    condition: Optional[str] = None  # filter 策略的条件表达式
+    group_by: Optional[str] = None  # group 策略的分组字段
+    summary_fields: Optional[List[str]] = None  # summary 策略的汇总字段
+    
+    # 并发控制
+    concurrent_group: Optional[str] = None
+    depends_on: List[str] = field(default_factory=list)
+    
+    # 通用字段
     input_mapping: Dict[str, str] = field(default_factory=dict)
     output_key: str = ""
     model_override: Optional[str] = None
     description: str = ""
-    required: bool = True  # 新增：步骤是否必需（如果为False，失败时继续执行）
+    required: bool = True  # 步骤是否必需（如果为False，失败时继续执行）
+    timeout: Optional[int] = None
     
     def get_dependencies(self) -> List[str]:
         """
@@ -171,54 +304,203 @@ class StepConfig:
         """验证步骤配置"""
         errors = []
         
+        # 基本字段验证
         if not self.id:
             errors.append("步骤 ID 不能为空")
         elif not self.id.isidentifier():
             errors.append(f"步骤 ID '{self.id}' 不是有效的标识符")
+        
+        # 验证步骤类型
+        valid_types = ["agent_flow", "code_node", "batch_aggregator"]
+        if not self.type:
+            errors.append("步骤类型不能为空")
+        elif self.type not in valid_types:
+            errors.append(
+                f"不支持的步骤类型: {self.type}，"
+                f"支持的类型: {', '.join(valid_types)}"
+            )
+        
+        # 根据类型验证特定字段
+        if self.type == "agent_flow":
+            if not self.agent:
+                errors.append("Agent Flow 步骤的 agent 字段不能为空")
+            if not self.flow:
+                errors.append("Agent Flow 步骤的 flow 字段不能为空")
+        
+        elif self.type == "code_node":
+            # 验证代码节点配置
+            if self.code_config:
+                errors.extend(self.code_config.validate())
+            else:
+                # 向后兼容：检查直接在 step 中指定的字段
+                if not self.language:
+                    errors.append("代码节点必须指定 language 字段")
+                elif self.language not in ["javascript", "python"]:
+                    errors.append(
+                        f"不支持的代码语言: {self.language}，"
+                        f"支持的语言: javascript, python"
+                    )
+                
+                if not self.code and not self.code_file:
+                    errors.append("代码节点必须指定 code（内联代码）或 code_file（外部文件）之一")
+                
+                if self.code and self.code_file:
+                    errors.append("代码节点不能同时指定 code 和 code_file")
+        
+        elif self.type == "batch_aggregator":
+            # 验证批量聚合配置
+            if not self.aggregation_strategy:
+                errors.append("批量聚合步骤必须指定 aggregation_strategy")
+            elif self.aggregation_strategy not in ["concat", "stats", "filter", "group", "summary", "custom"]:
+                errors.append(
+                    f"不支持的聚合策略: {self.aggregation_strategy}，"
+                    f"支持的策略: concat, stats, filter, group, summary, custom"
+                )
             
-        if self.type != "agent_flow":
-            errors.append(f"不支持的步骤类型: {self.type}")
+            # 验证策略特定字段
+            if self.aggregation_strategy == "custom":
+                # Accept either 'code', 'aggregation_code', or 'code_file'
+                has_code = self.code or self.aggregation_code or self.code_file
+                if not has_code:
+                    errors.append("自定义聚合策略必须指定 code, aggregation_code 或 code_file")
+                if not self.language:
+                    errors.append("自定义聚合策略必须指定 language (python 或 javascript)")
             
-        if not self.agent:
-            errors.append("Agent ID 不能为空")
+            if self.aggregation_strategy == "stats" and not self.fields:
+                errors.append("stats 聚合策略必须指定 fields 字段列表")
             
-        if not self.flow:
-            errors.append("Flow 名称不能为空")
+            if self.aggregation_strategy == "filter" and not self.condition:
+                errors.append("filter 聚合策略必须指定 condition 过滤条件")
             
+            if self.aggregation_strategy == "group" and not self.group_by:
+                errors.append("group 聚合策略必须指定 group_by 分组字段")
+            
+            if self.aggregation_strategy == "summary" and not self.summary_fields:
+                errors.append("summary 聚合策略必须指定 summary_fields 汇总字段列表")
+        
+        # 验证批量处理配置
+        if self.batch_mode:
+            if self.batch_size <= 0:
+                errors.append("batch_size 必须是正整数")
+            if self.max_workers <= 0:
+                errors.append("max_workers 必须是正整数")
+        
+        # 验证输出键
         if not self.output_key:
             errors.append("输出键不能为空")
         elif not self.output_key.isidentifier():
             errors.append(f"输出键 '{self.output_key}' 不是有效的标识符")
-            
-        # 验证 input_mapping 的值格式
+        
+        # 验证 input_mapping
         for param, source in self.input_mapping.items():
             if not param:
                 errors.append("输入映射的键不能为空")
             if not source:
                 errors.append(f"输入映射源 '{param}' 不能为空")
-                
+        
+        # 验证 timeout
+        if self.timeout is not None and self.timeout <= 0:
+            errors.append("timeout 必须是正整数")
+        
         return errors
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> StepConfig:
         """从字典创建 StepConfig 实例"""
-        return cls(**data)
+        # 处理 code_config
+        code_config = None
+        if "code_config" in data and data["code_config"]:
+            if isinstance(data["code_config"], dict):
+                code_config = CodeNodeConfig.from_dict(data["code_config"])
+            elif isinstance(data["code_config"], CodeNodeConfig):
+                code_config = data["code_config"]
+        
+        # 创建 StepConfig 实例
+        step_data = data.copy()
+        if "code_config" in step_data:
+            step_data["code_config"] = code_config
+        
+        return cls(**step_data)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
         result = {
             "id": self.id,
             "type": self.type,
-            "agent": self.agent,
-            "flow": self.flow,
             "input_mapping": self.input_mapping,
-            "output_key": self.output_key
+            "output_key": self.output_key,
         }
+        
+        # Agent Flow 字段
+        if self.agent:
+            result["agent"] = self.agent
+        if self.flow:
+            result["flow"] = self.flow
         if self.model_override:
             result["model_override"] = self.model_override
+        
+        # Code Node 字段
+        if self.code_config:
+            result["code_config"] = self.code_config.to_dict()
+        elif self.type == "code_node":
+            # 向后兼容：直接在 step 中的字段
+            if self.language:
+                result["language"] = self.language
+            if self.code:
+                result["code"] = self.code
+            if self.code_file:
+                result["code_file"] = self.code_file
+        
+        # 批量处理字段
+        if self.batch_mode:
+            result["batch_mode"] = self.batch_mode
+            result["batch_size"] = self.batch_size
+            if not self.concurrent:
+                result["concurrent"] = self.concurrent
+            if self.max_workers != 4:
+                result["max_workers"] = self.max_workers
+        
+        # 聚合字段
+        if self.aggregation_strategy:
+            result["aggregation_strategy"] = self.aggregation_strategy
+        if self.aggregation_code:
+            result["aggregation_code"] = self.aggregation_code
+        if self.separator is not None:
+            result["separator"] = self.separator
+        if self.fields:
+            result["fields"] = self.fields
+        if self.condition:
+            result["condition"] = self.condition
+        if self.group_by:
+            result["group_by"] = self.group_by
+        if self.summary_fields:
+            result["summary_fields"] = self.summary_fields
+        
+        # 并发控制
+        if self.concurrent_group:
+            result["concurrent_group"] = self.concurrent_group
+        if self.depends_on:
+            result["depends_on"] = self.depends_on
+        
+        # 其他字段
         if self.description:
             result["description"] = self.description
+        if not self.required:
+            result["required"] = self.required
+        if self.timeout is not None:
+            result["timeout"] = self.timeout
+        
         return result
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'StepConfig':
+        """从 JSON 字符串创建 StepConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -233,6 +515,31 @@ class BaselineStepConfig:
         if not self.flow:
             errors.append("Baseline 步骤缺少 flow 配置")
         return errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        result = {"flow": self.flow}
+        if self.model:
+            result["model"] = self.model
+        return result
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'BaselineStepConfig':
+        """从字典创建 BaselineStepConfig 实例"""
+        return cls(
+            flow=data.get("flow", ""),
+            model=data.get("model")
+        )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'BaselineStepConfig':
+        """从 JSON 字符串创建 BaselineStepConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -258,6 +565,36 @@ class BaselineConfig:
                 errors.extend(step_config.validate())
                 
         return errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "steps": {step_id: step.to_dict() for step_id, step in self.steps.items()}
+        }
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'BaselineConfig':
+        """从字典创建 BaselineConfig 实例"""
+        steps = {}
+        for step_id, step_data in data.get("steps", {}).items():
+            steps[step_id] = BaselineStepConfig.from_dict(step_data)
+        return cls(
+            name=data.get("name", ""),
+            description=data.get("description", ""),
+            steps=steps
+        )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'BaselineConfig':
+        """从 JSON 字符串创建 BaselineConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -272,6 +609,33 @@ class VariantStepOverride:
         if not self.flow and not self.model:
             errors.append("变体步骤覆盖必须指定 flow 或 model 中的至少一个")
         return errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        result = {}
+        if self.flow:
+            result["flow"] = self.flow
+        if self.model:
+            result["model"] = self.model
+        return result
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'VariantStepOverride':
+        """从字典创建 VariantStepOverride 实例"""
+        return cls(
+            flow=data.get("flow"),
+            model=data.get("model")
+        )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'VariantStepOverride':
+        """从 JSON 字符串创建 VariantStepOverride 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -293,6 +657,34 @@ class VariantConfig:
                 errors.extend(override.validate())
                 
         return errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "description": self.description,
+            "overrides": {step_id: override.to_dict() for step_id, override in self.overrides.items()}
+        }
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'VariantConfig':
+        """从字典创建 VariantConfig 实例"""
+        overrides = {}
+        for step_id, override_data in data.get("overrides", {}).items():
+            overrides[step_id] = VariantStepOverride.from_dict(override_data)
+        return cls(
+            description=data.get("description", ""),
+            overrides=overrides
+        )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'VariantConfig':
+        """从 JSON 字符串创建 VariantConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -451,7 +843,7 @@ class PipelineConfig:
         # 处理 steps
         steps = []
         for step_data in data.get("steps", []):
-            steps.append(StepConfig(**step_data))
+            steps.append(StepConfig.from_dict(step_data))
             
         # 处理 outputs
         outputs = []
@@ -516,19 +908,7 @@ class PipelineConfig:
         
         # 处理 steps
         for step in self.steps:
-            step_dict = {
-                "id": step.id,
-                "type": step.type,
-                "agent": step.agent,
-                "flow": step.flow,
-                "input_mapping": step.input_mapping,
-                "output_key": step.output_key,
-            }
-            if step.model_override:
-                step_dict["model_override"] = step.model_override
-            if step.description:
-                step_dict["description"] = step.description
-            result["steps"].append(step_dict)
+            result["steps"].append(step.to_dict())
             
         # 处理 baseline
         if self.baseline:
@@ -563,6 +943,16 @@ class PipelineConfig:
             result["variants"] = variants_dict
             
         return result
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'PipelineConfig':
+        """从 JSON 字符串创建 PipelineConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -574,6 +964,20 @@ class RuleConfig:
     severity: str = "error"  # "error" | "warning"
     message: str = ""
     
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "name": self.name,
+            "type": self.type,
+            "params": self.params,
+            "severity": self.severity,
+            "message": self.message
+        }
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'RuleConfig':
         """从字典创建 RuleConfig 实例"""
@@ -584,6 +988,12 @@ class RuleConfig:
             severity=data.get("severity", "error"),
             message=data.get("message", "")
         )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'RuleConfig':
+        """从 JSON 字符串创建 RuleConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -596,6 +1006,21 @@ class CaseFieldConfig:
     as_json: bool = False
     required: bool = False
     
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "key": self.key,
+            "label": self.label,
+            "section": self.section,
+            "truncate": self.truncate,
+            "as_json": self.as_json,
+            "required": self.required
+        }
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CaseFieldConfig':
         """从字典创建 CaseFieldConfig 实例"""
@@ -607,6 +1032,12 @@ class CaseFieldConfig:
             as_json=data.get("as_json", False),
             required=data.get("required", False)
         )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'CaseFieldConfig':
+        """从 JSON 字符串创建 CaseFieldConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -700,6 +1131,49 @@ class EvaluationConfig:
             scale_max=10,
             case_fields=[]
         )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "rules": [rule.to_dict() for rule in self.rules],
+            "judge_enabled": self.judge_enabled,
+            "judge_agent_id": self.judge_agent_id,
+            "judge_flow": self.judge_flow,
+            "judge_model": self.judge_model,
+            "scale_min": self.scale_min,
+            "scale_max": self.scale_max,
+            "case_fields": [field.to_dict() for field in self.case_fields],
+            "temperature": self.temperature,
+            "preferred_judge_model": self.preferred_judge_model
+        }
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationConfig':
+        """从字典创建 EvaluationConfig 实例"""
+        rules = [RuleConfig.from_dict(rule_data) for rule_data in data.get("rules", [])]
+        case_fields = [CaseFieldConfig.from_dict(field_data) for field_data in data.get("case_fields", [])]
+        return cls(
+            rules=rules,
+            judge_enabled=data.get("judge_enabled", False),
+            judge_agent_id=data.get("judge_agent_id"),
+            judge_flow=data.get("judge_flow"),
+            judge_model=data.get("judge_model"),
+            scale_min=data.get("scale_min", 0),
+            scale_max=data.get("scale_max", 10),
+            case_fields=case_fields,
+            temperature=data.get("temperature", 0.0),
+            preferred_judge_model=data.get("preferred_judge_model")
+        )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'EvaluationConfig':
+        """从 JSON 字符串创建 EvaluationConfig 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -759,6 +1233,16 @@ class EvaluationResult:
             failed_steps=data.get("failed_steps", []),
             created_at=created_at
         )
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'EvaluationResult':
+        """从 JSON 字符串创建 EvaluationResult 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -793,6 +1277,16 @@ class RegressionCase:
             severity=data.get("severity", "minor"),
             description=data.get("description", "")
         )
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'RegressionCase':
+        """从 JSON 字符串创建 RegressionCase 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -850,3 +1344,13 @@ class ComparisonReport:
             summary=data.get("summary", ""),
             created_at=created_at
         )
+    
+    def to_json(self) -> str:
+        """转换为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'ComparisonReport':
+        """从 JSON 字符串创建 ComparisonReport 实例"""
+        data = json.loads(json_str)
+        return cls.from_dict(data)

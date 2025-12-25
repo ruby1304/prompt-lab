@@ -1,0 +1,65 @@
+id: "action_selector"
+name: "动作选择器"
+type: "task"
+description: |
+  根据对话历史和用户最新输入，扮演角色，从动作库中选出动作：
+  - 分析对话上下文和用户输入
+  - 从预定义动作库中选择最合适的动作
+  - 仅输出动作+句号，不做任何解释
+
+business_goal: |
+  - 准确识别用户输入的情感和意图
+  - 从动作库中选择最匹配的动作
+  - 严格遵循输出格式要求（动作+句号）
+
+expectations:
+  must_have:
+    - 输出必须是动作库中的枚举值之一
+    - 输出格式必须为"动作。"
+    - 禁止输出任何解释、理由或回答
+  nice_to_have:
+    - ASR纠错能力（音近字替换）
+    - 准确理解对话上下文
+
+default_testset: "default.jsonl"
+
+flows:
+  - name: "action_selector_v1"
+    file: "action_selector_v1.yaml"
+    notes: "初始版本，基础动作选择功能"
+
+evaluation:
+  judge_agent_id: "judge_default"
+  judge_flow: "judge_v2"
+  scale:
+    min: 0
+    max: 10
+  preferred_judge_model: "doubao-1-5-pro-32k-250115"
+  temperature: 0.0
+  
+  rules:
+    - id: "not_empty"
+      kind: "non_empty"
+      target: "output"
+      action: "mark_bad"
+    - id: "reasonable_length"
+      kind: "max_chars"
+      target: "output"
+      max_chars: 20
+      action: "mark_bad"
+  
+  case_fields:
+    - key: "chat_history"
+      label: "对话历史"
+      section: "context"
+      required: true
+    
+    - key: "user_input"
+      label: "最新用户输入"
+      section: "primary_input"
+      required: true
+    
+    - key: "expected"
+      label: "期望动作"
+      section: "meta"
+      required: false

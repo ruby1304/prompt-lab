@@ -19,6 +19,10 @@
 
 ## 使用方法
 
+```bash
+python -m src eval --agent usr_profile --limit 3
+```
+
 输入对话历史数据，agent 会按照固定格式输出十个维度的用户画像信息。
 
 ## 输出格式
@@ -35,3 +39,8 @@
 <对{role}的期望（希望{role}能...）>把{role}当猫养
 <愿望（希望...发生）>与{role}结婚
 ```
+
+## 相关文档
+
+- [Agent 管理指南](../../docs/guides/agent-management.md)
+- [使用指南](../../docs/USAGE_GUIDE.md)

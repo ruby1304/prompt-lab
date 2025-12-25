@@ -1,0 +1,195 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prompt-lab.io/schemas/code-node.schema.json",
+  "title": "Code Node Configuration Schema",
+  "description": "Schema for validating code node configurations in pipeline YAML files",
+  "type": "object",
+  "required": ["id", "type", "language", "output_key"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the code node step",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+      "minLength": 1,
+      "maxLength": 100,
+      "examples": ["transform_data", "aggregate_results", "clean_input"]
+    },
+    "type": {
+      "type": "string",
+      "description": "Step type identifier",
+      "const": "code_node"
+    },
+    "language": {
+      "type": "string",
+      "description": "Programming language for code execution",
+      "enum": ["javascript", "python"],
+      "examples": ["javascript", "python"]
+    },
+    "code": {
+      "type": "string",
+      "description": "Inline code to execute (multiline string)",
+      "minLength": 1,
+      "examples": [
+        "function transform(inputs) { return inputs; }\nmodule.exports = transform;",
+        "def execute(data):\n    return data"
+      ]
+    },
+    "code_file": {
+      "type": "string",
+      "description": "Path to external code file (relative to project root)",
+      "pattern": "^[^\\0]+\\.(js|py)$",
+      "examples": ["scripts/transform.js", "scripts/aggregate.py"]
+    },
+    "input_mapping": {
+      "type": "object",
+      "description": "Maps parameter names to data sources",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Data source (pipeline input or previous step output)",
+        "minLength": 1
+      },
+      "examples": [
+        {
+          "data": "previous_step_output",
+          "config": "pipeline_config"
+        }
+      ]
+    },
+    "output_key": {
+      "type": "string",
+      "description": "Key name for storing the step's output",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+      "minLength": 1,
+      "maxLength": 100,
+      "examples": ["transformed_data", "aggregated_result", "cleaned_input"]
+    },
+    "timeout": {
+      "type": "integer",
+      "description": "Maximum execution time in seconds",
+      "minimum": 1,
+      "maximum": 3600,
+      "default": 30,
+      "examples": [30, 60, 120]
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the code node",
+      "maxLength": 500,
+      "examples": [
+        "Transform data using custom logic",
+        "Aggregate results from multiple sources"
+      ]
+    },
+    "required": {
+      "type": "boolean",
+      "description": "Whether step failure should halt pipeline execution",
+      "default": true,
+      "examples": [true, false]
+    },
+    "env_vars": {
+      "type": "object",
+      "description": "Environment variables for code execution",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Environment variable value"
+      },
+      "examples": [
+        {
+          "DEBUG": "false",
+          "MAX_ITEMS": "1000",
+          "API_KEY": "${EXTERNAL_API_KEY}"
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["code"],
+      "not": {
+        "required": ["code_file"]
+      }
+    },
+    {
+      "required": ["code_file"],
+      "not": {
+        "required": ["code"]
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "transform_data",
+      "type": "code_node",
+      "language": "javascript",
+      "code": "function transform(inputs) {\n  return inputs.map(item => ({\n    ...item,\n    processed: true\n  }));\n}\nmodule.exports = transform;",
+      "input_mapping": {
+        "inputs": "previous_step_output"
+      },
+      "output_key": "transformed_data",
+      "timeout": 30,
+      "description": "Transform data using custom logic",
+      "required": true
+    },
+    {
+      "id": "aggregate_results",
+      "type": "code_node",
+      "language": "python",
+      "code_file": "scripts/aggregate.py",
+      "input_mapping": {
+        "data": "transformed_data",
+        "config": "pipeline_config"
+      },
+      "output_key": "aggregated_result",
+      "timeout": 60,
+      "env_vars": {
+        "DEBUG": "false",
+        "MAX_ITEMS": "1000"
+      }
+    }
+  ],
+  "definitions": {
+    "javascript_code_requirements": {
+      "description": "Requirements for JavaScript code nodes",
+      "properties": {
+        "runtime": {
+          "const": "Node.js",
+          "description": "Node.js runtime must be available"
+        },
+        "export_format": {
+          "const": "module.exports",
+          "description": "Code must export a function using module.exports"
+        },
+        "input_format": {
+          "const": "object",
+          "description": "Function receives inputs as a single object parameter"
+        },
+        "output_format": {
+          "enum": ["value", "Promise"],
+          "description": "Function must return the output value or a Promise"
+        }
+      }
+    },
+    "python_code_requirements": {
+      "description": "Requirements for Python code nodes",
+      "properties": {
+        "runtime": {
+          "const": "Python",
+          "description": "Python interpreter must be available"
+        },
+        "function_name": {
+          "const": "execute",
+          "description": "Code must define a main function named 'execute'"
+        },
+        "input_format": {
+          "const": "kwargs",
+          "description": "Function receives inputs as keyword arguments"
+        },
+        "output_format": {
+          "const": "json_serializable",
+          "description": "Function must return JSON-serializable output"
+        }
+      }
+    }
+  }
+}

@@ -181,6 +181,10 @@ class PipelineEvaluator:
                     # 获取失败的步骤
                     failed_steps = [step.step_id for step in pipeline_result.get_failed_steps()]
                     
+                    # 检查是否需要中间步骤评估和聚合评估
+                    evaluate_intermediate = sample.get('intermediate_expectations') is not None
+                    evaluate_aggregation = sample.get('expected_aggregation') is not None
+                    
                     eval_result = evaluator.evaluate_pipeline_output(
                         pipeline_id=self.config.id,
                         variant=variant,
@@ -188,7 +192,9 @@ class PipelineEvaluator:
                         step_outputs=step_outputs_dict,
                         final_output=final_output,
                         execution_time=pipeline_result.total_execution_time,
-                        evaluation_target=self.config.evaluation_target
+                        evaluation_target=self.config.evaluation_target,
+                        evaluate_intermediate=evaluate_intermediate,
+                        evaluate_aggregation=evaluate_aggregation
                     )
                     
                     # 添加失败步骤信息

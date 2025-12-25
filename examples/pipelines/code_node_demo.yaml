@@ -1,0 +1,169 @@
+# Example Pipeline with Code Nodes
+# This pipeline demonstrates various code node configurations
+
+id: "code_node_demo"
+name: "Code Node Demonstration Pipeline"
+description: |
+  Example pipeline showing how to use code nodes for data transformation,
+  preprocessing, and aggregation alongside agent steps.
+
+inputs:
+  - name: "raw_data"
+    desc: "Raw input data to process"
+    required: true
+  - name: "threshold"
+    desc: "Filtering threshold for data processing"
+    required: false
+  - name: "aggregation_strategy"
+    desc: "Strategy for aggregating results (concat, stats, summary)"
+    required: false
+
+steps:
+  # Step 1: Clean and validate input data using inline Python code
+  - id: "clean_data"
+    type: "code_node"
+    language: "python"
+    code: |
+      def execute(raw_data):
+        """
+        Clean and validate input data
+        Remove null values, normalize structure
+        """
+        if not isinstance(raw_data, list):
+          raw_data = [raw_data]
+        
+        cleaned = []
+        for item in raw_data:
+          if item and isinstance(item, dict):
+            cleaned_item = {
+              'id': item.get('id', ''),
+              'text': str(item.get('text', '')).strip(),
+              'score': float(item.get('score', 0)),
+              'metadata': item.get('metadata', {})
+            }
+            if cleaned_item['text']:  # Only include items with text
+              cleaned.append(cleaned_item)
+        
+        return {
+          'items': cleaned,
+          'original_count': len(raw_data),
+          'cleaned_count': len(cleaned)
+        }
+    input_mapping:
+      raw_data: "raw_data"
+    output_key: "cleaned_data"
+    timeout: 30
+    description: "Clean and validate input data"
+    required: true
+
+  # Step 2: Transform data using external JavaScript file
+  - id: "transform_data"
+    type: "code_node"
+    language: "javascript"
+    code_file: "examples/code_nodes/transform.js"
+    input_mapping:
+      items: "cleaned_data.items"
+      threshold: "threshold"
+    output_key: "transformed_data"
+    timeout: 30
+    description: "Transform and filter data based on threshold"
+    required: true
+
+  # Step 3: Process with Agent (LLM-based analysis)
+  - id: "analyze_items"
+    type: "agent_flow"
+    agent: "mem0_l1_summarizer"
+    flow: "mem0_l1_v1"
+    input_mapping:
+      text: "transformed_data.items"
+    output_key: "analysis_result"
+    description: "Analyze transformed items using LLM"
+    required: true
+
+  # Step 4: Aggregate results using external Python file
+  - id: "aggregate_results"
+    type: "code_node"
+    language: "python"
+    code_file: "examples/code_nodes/aggregate.py"
+    input_mapping:
+      items: "transformed_data.items"
+      strategy: "aggregation_strategy"
+    output_key: "aggregated_data"
+    timeout: 60
+    description: "Aggregate results using specified strategy"
+    required: true
+
+  # Step 5: Generate final report using inline JavaScript
+  - id: "generate_report"
+    type: "code_node"
+    language: "javascript"
+    code: |
+      function generateReport(inputs) {
+        const { cleaned, transformed, analysis, aggregated } = inputs;
+        
+        return {
+          report: {
+            title: "Data Processing Report",
+            timestamp: new Date().toISOString(),
+            summary: {
+              input_items: cleaned.original_count,
+              cleaned_items: cleaned.cleaned_count,
+              transformed_items: transformed.stats.filtered,
+              removed_items: transformed.stats.removed,
+              average_score: transformed.stats.average_score
+            },
+            analysis: analysis,
+            aggregation: aggregated,
+            status: "completed"
+          }
+        };
+      }
+      module.exports = generateReport;
+    input_mapping:
+      cleaned: "cleaned_data"
+      transformed: "transformed_data"
+      analysis: "analysis_result"
+      aggregated: "aggregated_data"
+    output_key: "final_report"
+    timeout: 15
+    description: "Generate final processing report"
+    required: true
+
+  # Step 6: Optional validation step (won't halt pipeline if it fails)
+  - id: "validate_report"
+    type: "code_node"
+    language: "python"
+    code: |
+      def execute(report):
+        """Validate the final report structure"""
+        required_fields = ['title', 'timestamp', 'summary', 'status']
+        
+        if not isinstance(report, dict) or 'report' not in report:
+          raise ValueError('Invalid report structure')
+        
+        report_data = report['report']
+        missing_fields = [f for f in required_fields if f not in report_data]
+        
+        if missing_fields:
+          raise ValueError(f'Missing required fields: {missing_fields}')
+        
+        return {
+          'valid': True,
+          'message': 'Report validation passed',
+          'fields_checked': required_fields
+        }
+    input_mapping:
+      report: "final_report"
+    output_key: "validation_result"
+    timeout: 10
+    description: "Validate final report structure"
+    required: false  # Optional step - pipeline continues even if validation fails
+
+outputs:
+  - key: "final_report"
+    label: "Final Processing Report"
+  - key: "validation_result"
+    label: "Validation Result"
+
+# Default testset for this pipeline
+default_testset: "code_node_demo.jsonl"

@@ -1,0 +1,8 @@
+id,variant,overall_score,must_have_pass,execution_time,judge_feedback,rule_violations
+1,baseline,0.0,False,0.0,"Pipeline 执行失败: 必需步骤 'entity_extraction' 执行失败: 步骤执行失败: 执行 Agent/Flow 失败: Invalid format specifier ' [""产品1"", ""产品2""],
+  ""订单号"": [""订单号""],
+  ""时间"": [""时间信息""],
+  ""金额"": [""金额信息""],
+  ""联系方式"": [""联系方式""],
+  ""其他"": [""其他信息""]
+' for object of type 'str'",

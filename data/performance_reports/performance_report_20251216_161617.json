@@ -1,0 +1,228 @@
+{
+  "test_name": "Concurrent Executor Performance Test",
+  "timestamp": "2025-12-16 16:16:17",
+  "system_info": {
+    "cpu_count": 8,
+    "total_memory_gb": 16.0,
+    "available_memory_gb": 6.727973937988281,
+    "platform": "darwin",
+    "python_version": "3.12.0 (v3.12.0:0fb18b02c8, Oct  2 2023, 09:45:56) [Clang 13.0.0 (clang-1300.0.29.30)]"
+  },
+  "metrics": [
+    {
+      "execution_time": 2.06221079826355,
+      "speedup": 0.969832958727627,
+      "throughput": 9.69832958727627,
+      "memory_usage_mb": 0.05078125,
+      "memory_peak_mb": 0.05078125,
+      "cpu_percent": 0.5,
+      "strategy": "thread",
+      "max_workers": 1,
+      "task_count": 20,
+      "metadata": {
+        "test_type": "scaling"
+      }
+    },
+    {
+      "execution_time": 1.036336898803711,
+      "speedup": 1.929874351003701,
+      "throughput": 19.298743510037013,
+      "memory_usage_mb": 0.02734375,
+      "memory_peak_mb": 0.02734375,
+      "cpu_percent": 0.9,
+      "strategy": "thread",
+      "max_workers": 2,
+      "task_count": 20,
+      "metadata": {
+        "test_type": "scaling"
+      }
+    },
+    {
+      "execution_time": 0.5184681415557861,
+      "speedup": 3.857517636471409,
+      "throughput": 38.57517636471409,
+      "memory_usage_mb": 0.0078125,
+      "memory_peak_mb": 0.0078125,
+      "cpu_percent": 1.8,
+      "strategy": "thread",
+      "max_workers": 4,
+      "task_count": 20,
+      "metadata": {
+        "test_type": "scaling"
+      }
+    },
+    {
+      "execution_time": 0.3163337707519531,
+      "speedup": 6.322435936086825,
+      "throughput": 63.224359360868256,
+      "memory_usage_mb": 0.01171875,
+      "memory_peak_mb": 0.01171875,
+      "cpu_percent": 3.6,
+      "strategy": "thread",
+      "max_workers": 8,
+      "task_count": 20,
+      "metadata": {
+        "test_type": "scaling"
+      }
+    },
+    {
+      "execution_time": 0.20766472816467285,
+      "speedup": 9.630908521037096,
+      "throughput": 96.30908521037097,
+      "memory_usage_mb": 0.01953125,
+      "memory_peak_mb": 0.01953125,
+      "cpu_percent": 4.9,
+      "strategy": "thread",
+      "max_workers": 16,
+      "task_count": 20,
+      "metadata": {
+        "test_type": "scaling"
+      }
+    },
+    {
+      "execution_time": 0.1575930118560791,
+      "speedup": 3.1727295145334367,
+      "throughput": 63.45459029066873,
+      "memory_usage_mb": 0.0078125,
+      "memory_peak_mb": 0.0546875,
+      "cpu_percent": 1.9,
+      "strategy": "thread",
+      "max_workers": 4,
+      "task_count": 10,
+      "metadata": {
+        "test_type": "memory",
+        "memory_per_task_kb": 5.6
+      }
+    },
+    {
+      "execution_time": 0.7034189701080322,
+      "speedup": 3.554069631667804,
+      "throughput": 71.08139263335607,
+      "memory_usage_mb": 0.0390625,
+      "memory_peak_mb": 0.0859375,
+      "cpu_percent": 3.4,
+      "strategy": "thread",
+      "max_workers": 4,
+      "task_count": 50,
+      "metadata": {
+        "test_type": "memory",
+        "memory_per_task_kb": 1.76
+      }
+    },
+    {
+      "execution_time": 1.3388340473175049,
+      "speedup": 3.734592804849882,
+      "throughput": 74.69185609699764,
+      "memory_usage_mb": 0.1328125,
+      "memory_peak_mb": 0.1796875,
+      "cpu_percent": 2.8,
+      "strategy": "thread",
+      "max_workers": 4,
+      "task_count": 100,
+      "metadata": {
+        "test_type": "memory",
+        "memory_per_task_kb": 1.84
+      }
+    },
+    {
+      "execution_time": 2.6804583072662354,
+      "speedup": 3.730705295020563,
+      "throughput": 74.61410590041126,
+      "memory_usage_mb": 0.33203125,
+      "memory_peak_mb": 0.37890625,
+      "cpu_percent": 3.1,
+      "strategy": "thread",
+      "max_workers": 4,
+      "task_count": 200,
+      "metadata": {
+        "test_type": "memory",
+        "memory_per_task_kb": 1.94
+      }
+    },
+    {
+      "execution_time": 1.037729024887085,
+      "speedup": 3.854570802272047,
+      "throughput": 38.54570802272047,
+      "memory_usage_mb": 0.0,
+      "memory_peak_mb": 0.0,
+      "cpu_percent": 1.5,
+      "strategy": "thread",
+      "max_workers": 4,
+      "task_count": 40,
+      "metadata": {
+        "test_type": "optimal_worker",
+        "efficiency": 0.9636427005680117,
+        "cpu_ratio": 0.5
+      }
+    },
+    {
+      "execution_time": 0.51578688621521,
+      "speedup": 7.755140944647857,
+      "throughput": 77.55140944647857,
+      "memory_usage_mb": 0.0078125,
+      "memory_peak_mb": 0.0078125,
+      "cpu_percent": 2.4,
+      "strategy": "thread",
+      "max_workers": 8,
+      "task_count": 40,
+      "metadata": {
+        "test_type": "optimal_worker",
+        "efficiency": 0.9693926180809821,
+        "cpu_ratio": 1.0
+      }
+    },
+    {
+      "execution_time": 0.3118860721588135,
+      "speedup": 12.825195983625669,
+      "throughput": 128.25195983625667,
+      "memory_usage_mb": 0.0,
+      "memory_peak_mb": 0.0,
+      "cpu_percent": 4.8,
+      "strategy": "thread",
+      "max_workers": 16,
+      "task_count": 40,
+      "metadata": {
+        "test_type": "optimal_worker",
+        "efficiency": 0.8015747489766043,
+        "cpu_ratio": 2.0
+      }
+    },
+    {
+      "execution_time": 0.2139749526977539,
+      "speedup": 18.69377676951807,
+      "throughput": 186.9377676951807,
+      "memory_usage_mb": 0.0078125,
+      "memory_peak_mb": 0.0078125,
+      "cpu_percent": 10.8,
+      "strategy": "thread",
+      "max_workers": 32,
+      "task_count": 40,
+      "metadata": {
+        "test_type": "optimal_worker",
+        "efficiency": 0.5841805240474397,
+        "cpu_ratio": 4.0
+      }
+    }
+  ],
+  "summary": {
+    "total_tests": 13,
+    "average_speedup": 6.156257780727845,
+    "best_speedup": 18.69377676951807,
+    "average_throughput": 72.47957568887206,
+    "max_throughput": 186.9377676951807,
+    "total_memory_peak_mb": 0.37890625,
+    "average_memory_peak_mb": 0.06400240384615384
+  },
+  "recommendations": [
+    "最佳性能配置: 16 workers，加速比 9.63x",
+    "最高效率配置: 8 workers，效率 96.94%",
+    "对于IO密集型任务，推荐max_workers设置为CPU核心数的1-2倍 (8-16)",
+    "对于CPU密集型任务，推荐max_workers设置为CPU核心数"
+  ],
+  "optimization_tips": [
+    "使用线程池策略处理IO密集型任务",
+    "复用ConcurrentExecutor实例以减少初始化开销",
+    "合理设置批量大小以平衡吞吐量和内存使用",
+    "监控实际工作负载并根据需要调整max_workers"
+  ]
+}

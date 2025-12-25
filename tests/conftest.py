@@ -6,19 +6,54 @@ pytest 配置和共享 fixtures
 import pytest
 import tempfile
 import shutil
+import os
 from pathlib import Path
 from typing import Dict, Any, List
 from unittest.mock import Mock, MagicMock
+from dotenv import load_dotenv
 
 from src.models import PipelineConfig, StepConfig, BaselineConfig, VariantConfig, VariantStepOverride, BaselineStepConfig
 from src.agent_registry import AgentConfig, AgentFlow
 
 
 def pytest_configure(config):
-    """注册自定义标记"""
+    """注册自定义标记并加载测试环境配置"""
+    # Register custom markers
     config.addinivalue_line(
         "markers", "integration: mark test as integration test (requires real LLM calls)"
     )
+    config.addinivalue_line(
+        "markers", "slow: mark test as slow running"
+    )
+    config.addinivalue_line(
+        "markers", "unit: mark test as unit test"
+    )
+    
+    # Load test environment variables
+    # Priority: .env.test > .env
+    env_test_path = Path(".env.test")
+    env_path = Path(".env")
+    
+    if env_test_path.exists():
+        load_dotenv(env_test_path, override=True)
+        print(f"\n✓ Loaded test environment from {env_test_path}")
+    elif env_path.exists():
+        load_dotenv(env_path, override=True)
+        print(f"\n✓ Loaded environment from {env_path}")
+    else:
+        print("\n⚠ Warning: No .env or .env.test file found")
+    
+    # Verify critical environment variables for integration tests
+    if config.option.markexpr and "integration" in config.option.markexpr:
+        required_vars = ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL_NAME"]
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        
+        if missing_vars:
+            print(f"\n⚠ Warning: Missing environment variables for integration tests: {', '.join(missing_vars)}")
+            print("  Integration tests may fail. Please configure .env.test file.")
+        else:
+            model_name = os.getenv("OPENAI_MODEL_NAME", "")
+            print(f"✓ Integration test environment configured (Model: {model_name})")
 
 
 @pytest.fixture

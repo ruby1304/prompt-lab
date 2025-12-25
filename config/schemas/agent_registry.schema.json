@@ -1,0 +1,487 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://promptlab.example.com/schemas/agent-registry.schema.json",
+  "title": "Agent Registry Configuration",
+  "description": "Schema for Prompt Lab Agent Registry configuration file",
+  "type": "object",
+  "required": ["version", "agents"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version",
+      "pattern": "^\\d+\\.\\d+$",
+      "examples": ["1.0"]
+    },
+    "registry": {
+      "$ref": "#/definitions/RegistryMetadata"
+    },
+    "agents": {
+      "type": "object",
+      "description": "Map of agent ID to agent metadata",
+      "additionalProperties": {
+        "$ref": "#/definitions/AgentMetadata"
+      },
+      "minProperties": 1
+    },
+    "categories": {
+      "type": "object",
+      "description": "Category definitions",
+      "additionalProperties": {
+        "$ref": "#/definitions/CategoryDefinition"
+      }
+    },
+    "environments": {
+      "type": "object",
+      "description": "Environment definitions",
+      "additionalProperties": {
+        "$ref": "#/definitions/EnvironmentDefinition"
+      }
+    },
+    "tag_taxonomy": {
+      "$ref": "#/definitions/TagTaxonomy"
+    },
+    "config": {
+      "$ref": "#/definitions/RegistryConfig"
+    }
+  },
+  "definitions": {
+    "RegistryMetadata": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable registry name",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of the registry",
+          "maxLength": 500
+        },
+        "last_updated": {
+          "type": "string",
+          "description": "Last update date (ISO 8601)",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "maintainer": {
+          "type": "string",
+          "description": "Registry maintainer",
+          "maxLength": 100
+        }
+      }
+    },
+    "AgentMetadata": {
+      "type": "object",
+      "required": [
+        "name",
+        "category",
+        "environment",
+        "owner",
+        "version",
+        "location",
+        "deprecated"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable agent name",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "description": "Agent category",
+          "enum": ["production", "example", "test", "system"]
+        },
+        "environment": {
+          "type": "string",
+          "description": "Deployment environment",
+          "enum": ["production", "staging", "demo", "test"]
+        },
+        "owner": {
+          "type": "string",
+          "description": "Team or person responsible",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?$"
+        },
+        "location": {
+          "type": "string",
+          "description": "Relative path to agent directory",
+          "pattern": "^[^/].*[^/]$"
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether agent is deprecated"
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of agent purpose",
+          "maxLength": 500
+        },
+        "business_goal": {
+          "type": "string",
+          "description": "Business objective",
+          "maxLength": 1000
+        },
+        "tags": {
+          "type": "array",
+          "description": "Classification tags",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "uniqueItems": true,
+          "maxItems": 20
+        },
+        "created_at": {
+          "type": "string",
+          "description": "Creation date (ISO 8601)",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "Last update date (ISO 8601)",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "dependencies": {
+          "type": "array",
+          "description": "Required agents or services",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "maintainer": {
+          "type": "string",
+          "description": "Current maintainer",
+          "maxLength": 100
+        },
+        "documentation_url": {
+          "type": "string",
+          "description": "Link to detailed documentation",
+          "format": "uri"
+        },
+        "deprecation_reason": {
+          "type": "string",
+          "description": "Reason for deprecation",
+          "maxLength": 500
+        },
+        "replacement_agent": {
+          "type": "string",
+          "description": "ID of replacement agent"
+        },
+        "deprecation_date": {
+          "type": "string",
+          "description": "Date when deprecated (ISO 8601)",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "removal_date": {
+          "type": "string",
+          "description": "Planned removal date (ISO 8601)",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "status": {
+          "type": "string",
+          "description": "Current status",
+          "enum": ["active", "deprecated", "experimental", "archived"],
+          "default": "active"
+        },
+        "performance_metrics": {
+          "$ref": "#/definitions/PerformanceMetrics"
+        }
+      },
+      "if": {
+        "properties": {
+          "deprecated": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": ["deprecation_reason"]
+      }
+    },
+    "CategoryDefinition": {
+      "type": "object",
+      "required": ["description"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Category description",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "color": {
+          "type": "string",
+          "description": "Hex color code",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Icon or emoji",
+          "maxLength": 10
+        }
+      }
+    },
+    "EnvironmentDefinition": {
+      "type": "object",
+      "required": ["description"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Environment description",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "requires_approval": {
+          "type": "boolean",
+          "description": "Whether deployments require approval",
+          "default": false
+        },
+        "approval_process": {
+          "type": "string",
+          "description": "Description of approval process",
+          "maxLength": 500
+        }
+      }
+    },
+    "TagTaxonomy": {
+      "type": "object",
+      "properties": {
+        "functional": {
+          "type": "array",
+          "description": "Functional tags",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "domain": {
+          "type": "array",
+          "description": "Domain tags",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "technical": {
+          "type": "array",
+          "description": "Technical tags",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "quality": {
+          "type": "array",
+          "description": "Quality tags",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "custom": {
+          "type": "object",
+          "description": "Custom tag categories",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "RegistryConfig": {
+      "type": "object",
+      "properties": {
+        "auto_sync": {
+          "$ref": "#/definitions/AutoSyncConfig"
+        },
+        "hot_reload": {
+          "$ref": "#/definitions/HotReloadConfig"
+        },
+        "validation": {
+          "$ref": "#/definitions/ValidationConfig"
+        },
+        "discovery": {
+          "$ref": "#/definitions/DiscoveryConfig"
+        }
+      }
+    },
+    "AutoSyncConfig": {
+      "type": "object",
+      "required": ["enabled", "scan_directories"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether auto-sync is enabled"
+        },
+        "scan_directories": {
+          "type": "array",
+          "description": "Directories to scan",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "exclude_patterns": {
+          "type": "array",
+          "description": "Glob patterns to exclude",
+          "items": {
+            "type": "string"
+          }
+        },
+        "auto_register": {
+          "type": "boolean",
+          "description": "Automatically register new agents",
+          "default": false
+        },
+        "conflict_resolution": {
+          "type": "string",
+          "description": "Conflict resolution strategy",
+          "enum": ["manual", "filesystem", "registry"],
+          "default": "manual"
+        }
+      }
+    },
+    "HotReloadConfig": {
+      "type": "object",
+      "required": ["enabled", "watch_file"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether hot reload is enabled"
+        },
+        "watch_file": {
+          "type": "string",
+          "description": "File to watch for changes"
+        },
+        "debounce_ms": {
+          "type": "integer",
+          "description": "Debounce delay in milliseconds",
+          "minimum": 100,
+          "maximum": 5000,
+          "default": 500
+        }
+      }
+    },
+    "ValidationConfig": {
+      "type": "object",
+      "properties": {
+        "strict_mode": {
+          "type": "boolean",
+          "description": "Enforce strict validation",
+          "default": true
+        },
+        "required_fields": {
+          "type": "array",
+          "description": "Fields that must be present",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "warn_on_missing_optional": {
+          "type": "array",
+          "description": "Optional fields to warn about",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "validate_location": {
+          "type": "boolean",
+          "description": "Validate location paths exist",
+          "default": true
+        },
+        "validate_dependencies": {
+          "type": "boolean",
+          "description": "Validate dependency references",
+          "default": true
+        },
+        "allow_custom_categories": {
+          "type": "boolean",
+          "description": "Allow custom categories",
+          "default": false
+        },
+        "allow_custom_environments": {
+          "type": "boolean",
+          "description": "Allow custom environments",
+          "default": false
+        }
+      }
+    },
+    "DiscoveryConfig": {
+      "type": "object",
+      "properties": {
+        "enable_fuzzy_search": {
+          "type": "boolean",
+          "description": "Enable fuzzy matching",
+          "default": true
+        },
+        "enable_tag_filtering": {
+          "type": "boolean",
+          "description": "Enable tag filtering",
+          "default": true
+        },
+        "enable_category_filtering": {
+          "type": "boolean",
+          "description": "Enable category filtering",
+          "default": true
+        },
+        "default_sort": {
+          "type": "string",
+          "description": "Default sort field",
+          "enum": ["name", "updated_at", "version", "category"],
+          "default": "name"
+        },
+        "case_sensitive_search": {
+          "type": "boolean",
+          "description": "Case-sensitive searches",
+          "default": false
+        }
+      }
+    },
+    "PerformanceMetrics": {
+      "type": "object",
+      "properties": {
+        "avg_latency_ms": {
+          "type": "integer",
+          "description": "Average latency in milliseconds",
+          "minimum": 0
+        },
+        "avg_tokens": {
+          "type": "integer",
+          "description": "Average token usage",
+          "minimum": 0
+        },
+        "success_rate": {
+          "type": "number",
+          "description": "Success rate (0.0 to 1.0)",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "cost_per_call": {
+          "type": "number",
+          "description": "Average cost per call in USD",
+          "minimum": 0.0
+        },
+        "throughput_per_hour": {
+          "type": "integer",
+          "description": "Maximum throughput per hour",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

@@ -202,6 +202,8 @@ class TestBaselineManager:
         eval_results = [
             EvaluationResult(
                 sample_id="sample1",
+                entity_type="pipeline",
+                entity_id="test_pipeline",
                 variant="baseline",
                 overall_score=8.5,
                 must_have_pass=True,
@@ -333,10 +335,10 @@ class TestBaselineManager:
         with open(baseline2_path, 'w', encoding='utf-8') as f:
             json.dump(test_data2, f)
         
-        mock_data_manager.get_baselines_dir.return_value = temp_dir
-        
-        # 列出 baselines
-        baselines = manager.list_baselines("agent", "test_agent")
+        # Mock the get_baselines_dir method
+        with patch.object(mock_data_manager, 'get_baselines_dir', return_value=temp_dir):
+            # 列出 baselines
+            baselines = manager.list_baselines("agent", "test_agent")
         
         assert len(baselines) == 2
         
@@ -358,9 +360,9 @@ class TestBaselineManager:
         """测试列出空目录的 baselines"""
         manager = BaselineManager(mock_data_manager)
         
-        mock_data_manager.get_baselines_dir.return_value = temp_dir / "nonexistent"
-        
-        baselines = manager.list_baselines("agent", "test_agent")
+        # Mock the get_baselines_dir method
+        with patch.object(mock_data_manager, 'get_baselines_dir', return_value=temp_dir / "nonexistent"):
+            baselines = manager.list_baselines("agent", "test_agent")
         
         assert baselines == []
     
@@ -375,9 +377,9 @@ class TestBaselineManager:
         invalid_file = baselines_dir / "test_agent.invalid.snapshot.json"
         invalid_file.write_text("invalid json")
         
-        mock_data_manager.get_baselines_dir.return_value = temp_dir
-        
-        baselines = manager.list_baselines("agent", "test_agent")
+        # Mock the get_baselines_dir method
+        with patch.object(mock_data_manager, 'get_baselines_dir', return_value=temp_dir):
+            baselines = manager.list_baselines("agent", "test_agent")
         
         # 应该跳过无效文件
         assert baselines == []
@@ -393,10 +395,10 @@ class TestBaselineManager:
         meta_path = baseline_path.with_suffix(baseline_path.suffix + ".meta.json")
         meta_path.write_text('{"meta": "data"}')
         
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
-        mock_data_manager.create_backup_if_exists.return_value = temp_dir / "backup.json"
-        
-        result = manager.delete_baseline("agent", "test_agent", "baseline_v1")
+        # Mock the methods
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path), \
+             patch.object(mock_data_manager, 'create_backup_if_exists', return_value=temp_dir / "backup.json"):
+            result = manager.delete_baseline("agent", "test_agent", "baseline_v1")
         
         assert result is True
         assert not baseline_path.exists()
@@ -407,9 +409,10 @@ class TestBaselineManager:
         manager = BaselineManager(mock_data_manager)
         
         baseline_path = temp_dir / "nonexistent.snapshot.json"
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
         
-        result = manager.delete_baseline("agent", "test_agent", "nonexistent")
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path):
+            result = manager.delete_baseline("agent", "test_agent", "nonexistent")
         
         assert result is False
     
@@ -440,11 +443,11 @@ class TestBaselineManager:
             elif baseline_name == "target":
                 return target_path
         
-        mock_data_manager.resolve_baseline_path.side_effect = mock_resolve_path
-        
-        result = manager.copy_baseline(
-            "agent", "test_agent", "source", "target", "复制的基线"
-        )
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', side_effect=mock_resolve_path):
+            result = manager.copy_baseline(
+                "agent", "test_agent", "source", "target", "复制的基线"
+            )
         
         assert result is True
         assert target_path.exists()
@@ -461,11 +464,11 @@ class TestBaselineManager:
         """测试复制不存在的源 baseline"""
         manager = BaselineManager(mock_data_manager)
         
-        mock_data_manager.resolve_baseline_path.return_value = Path("nonexistent.json")
-        
-        result = manager.copy_baseline(
-            "agent", "test_agent", "nonexistent", "target"
-        )
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=Path("nonexistent.json")):
+            result = manager.copy_baseline(
+                "agent", "test_agent", "nonexistent", "target"
+            )
         
         assert result is False
     
@@ -486,11 +489,11 @@ class TestBaselineManager:
             elif baseline_name == "target":
                 return target_path
         
-        mock_data_manager.resolve_baseline_path.side_effect = mock_resolve_path
-        
-        result = manager.copy_baseline(
-            "agent", "test_agent", "source", "target"
-        )
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', side_effect=mock_resolve_path):
+            result = manager.copy_baseline(
+                "agent", "test_agent", "source", "target"
+            )
         
         assert result is False
     
@@ -506,9 +509,9 @@ class TestBaselineManager:
         with open(baseline_path, 'w', encoding='utf-8') as f:
             json.dump(test_data, f)
         
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
-        
-        metrics = manager.get_baseline_performance("agent", "test_agent", "baseline_v1")
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path):
+            metrics = manager.get_baseline_performance("agent", "test_agent", "baseline_v1")
         
         assert metrics is not None
         assert metrics["score"] == 8.5
@@ -518,9 +521,9 @@ class TestBaselineManager:
         """测试获取不存在 baseline 的性能指标"""
         manager = BaselineManager(mock_data_manager)
         
-        mock_data_manager.resolve_baseline_path.return_value = Path("nonexistent.json")
-        
-        metrics = manager.get_baseline_performance("agent", "test_agent", "nonexistent")
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=Path("nonexistent.json")):
+            metrics = manager.get_baseline_performance("agent", "test_agent", "nonexistent")
         
         assert metrics is None
     
@@ -540,13 +543,13 @@ class TestBaselineManager:
         with open(baseline_path, 'w', encoding='utf-8') as f:
             json.dump(original_data, f)
         
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
-        
-        result = manager.update_baseline_metadata(
-            "agent", "test_agent", "baseline_v1",
-            new_description="更新的描述",
-            additional_metadata={"version": "1.1", "updated": True}
-        )
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path):
+            result = manager.update_baseline_metadata(
+                "agent", "test_agent", "baseline_v1",
+                new_description="更新的描述",
+                additional_metadata={"version": "1.1", "updated": True}
+            )
         
         assert result is True
         
@@ -575,9 +578,9 @@ class TestBaselineManager:
         with open(baseline_path, 'w', encoding='utf-8') as f:
             json.dump(valid_data, f)
         
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
-        
-        errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path):
+            errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
         
         assert errors == []
     
@@ -595,9 +598,9 @@ class TestBaselineManager:
         with open(baseline_path, 'w', encoding='utf-8') as f:
             json.dump(invalid_data, f)
         
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
-        
-        errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path):
+            errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
         
         assert len(errors) >= 4  # 至少4个错误
         assert any("实体类型" in error for error in errors)
@@ -620,9 +623,9 @@ class TestBaselineManager:
         with open(baseline_path, 'w', encoding='utf-8') as f:
             json.dump(invalid_data, f)
         
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
-        
-        errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path):
+            errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
         
         assert any("无效的实体类型" in error for error in errors)
     
@@ -642,9 +645,9 @@ class TestBaselineManager:
         with open(baseline_path, 'w', encoding='utf-8') as f:
             json.dump(invalid_data, f)
         
-        mock_data_manager.resolve_baseline_path.return_value = baseline_path
-        
-        errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
+        # Mock the method
+        with patch.object(mock_data_manager, 'resolve_baseline_path', return_value=baseline_path):
+            errors = manager.validate_baseline("agent", "test_agent", "baseline_v1")
         
         assert any("不是数字" in error for error in errors)
 

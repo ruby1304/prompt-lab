@@ -1002,7 +1002,7 @@ python -m src eval --agent judge_default --flows judge_v2 --limit 1
    - [README.md](../README.md) - 快速开始
    - [系统架构](ARCHITECTURE.md) - 架构说明
    - [Pipeline 配置指南](reference/pipeline-guide.md) - Pipeline 详细配置
-   - [Output Parser 使用指南](../OUTPUT_PARSER_USAGE.md) - Output Parser 配置
+   - [Output Parser 使用指南](guides/output-parser-usage.md) - Output Parser 配置
 5. **提交 Issue**: 在项目仓库中创建详细的问题报告
 
 ### 问题报告模板

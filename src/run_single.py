@@ -42,7 +42,7 @@ def chat(
     except ValueError as exc:  # 保持提示友好
         raise typer.BadParameter(str(exc))
 
-    output, token_info = run_flow_with_tokens(flow, text, context, extra_vars=extra_vars)
+    output, token_info, _parser_stats = run_flow_with_tokens(flow, text, context, extra_vars=extra_vars)
 
     console.print(
         Panel.fit(

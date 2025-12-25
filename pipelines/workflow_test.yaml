@@ -1,0 +1,19 @@
+default_testset: ''
+description: Testing workflow
+id: workflow_test
+inputs:
+- desc: Input
+  name: in
+  required: true
+name: Updated Workflow
+outputs:
+- key: out
+  label: Output
+steps:
+- agent: judge_default
+  flow: judge_v1
+  id: s1
+  input_mapping:
+    x: in
+  output_key: out
+  type: agent_flow

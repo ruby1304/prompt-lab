@@ -21,7 +21,15 @@ logger = logging.getLogger(__name__)
 
 # 获取项目根目录
 ROOT_DIR = Path(__file__).resolve().parent.parent
-PIPELINES_DIR = ROOT_DIR / "pipelines"
+
+# Pipeline 目录列表（按优先级排序）
+PIPELINE_DIRS = [
+    ROOT_DIR / "pipelines",           # 生产 Pipeline（优先级最高）
+    ROOT_DIR / "examples" / "pipelines",  # 示例 Pipeline
+]
+
+# 向后兼容
+PIPELINES_DIR = PIPELINE_DIRS[0]
 
 
 class PipelineConfigError(Exception):
@@ -134,25 +142,48 @@ class PipelineValidator:
         
         # 验证步骤中的 agent 和 flow 引用
         for step in config.steps:
-            # 检查 agent 是否存在
-            if step.agent not in self.available_agents:
-                available_list = ", ".join(sorted(self.available_agents)) if self.available_agents else "无"
-                errors.append(
-                    f"步骤 '{step.id}' 引用了不存在的 agent: {step.agent}\n"
-                    f"  可用的 agents: {available_list}\n"
-                    f"  修复建议: 请检查 agent ID 的拼写，或创建新的 agent"
-                )
-                continue
+            # 只验证 agent_flow 类型的步骤
+            if step.type == "agent_flow":
+                # 检查 agent 是否存在
+                if step.agent not in self.available_agents:
+                    available_list = ", ".join(sorted(self.available_agents)) if self.available_agents else "无"
+                    errors.append(
+                        f"步骤 '{step.id}' 引用了不存在的 agent: {step.agent}\n"
+                        f"  可用的 agents: {available_list}\n"
+                        f"  修复建议: 请检查 agent ID 的拼写，或创建新的 agent"
+                    )
+                    continue
+                    
+                # 检查 flow 是否存在
+                agent_flows = self.agent_flows.get(step.agent, set())
+                if step.flow not in agent_flows:
+                    available_flows = ", ".join(sorted(agent_flows)) if agent_flows else "无"
+                    errors.append(
+                        f"步骤 '{step.id}' 引用了 agent '{step.agent}' 中不存在的 flow: {step.flow}\n"
+                        f"  可用的 flows: {available_flows}\n"
+                        f"  修复建议: 请检查 flow 名称的拼写，或在 agent '{step.agent}' 中创建新的 flow"
+                    )
+            
+            elif step.type == "code_node":
+                # 验证代码节点的文件引用（如果使用外部文件）
+                code_file = None
+                if step.code_config and step.code_config.code_file:
+                    code_file = step.code_config.code_file
+                elif step.code_file:
+                    code_file = step.code_file
                 
-            # 检查 flow 是否存在
-            agent_flows = self.agent_flows.get(step.agent, set())
-            if step.flow not in agent_flows:
-                available_flows = ", ".join(sorted(agent_flows)) if agent_flows else "无"
-                errors.append(
-                    f"步骤 '{step.id}' 引用了 agent '{step.agent}' 中不存在的 flow: {step.flow}\n"
-                    f"  可用的 flows: {available_flows}\n"
-                    f"  修复建议: 请检查 flow 名称的拼写，或在 agent '{step.agent}' 中创建新的 flow"
-                )
+                if code_file:
+                    # 检查文件是否存在
+                    code_file_path = Path(code_file)
+                    if not code_file_path.is_absolute():
+                        code_file_path = ROOT_DIR / code_file
+                    
+                    if not code_file_path.exists():
+                        errors.append(
+                            f"步骤 '{step.id}' 引用的代码文件不存在: {code_file}\n"
+                            f"  查找路径: {code_file_path}\n"
+                            f"  修复建议: 请创建代码文件，或更新 code_file 字段"
+                        )
         
         # 验证 baseline 中的 flow 引用
         if config.baseline:
@@ -248,6 +279,82 @@ class PipelineValidator:
         return ROOT_DIR / testset_file
 
 
+def validate_code_node_config(step_data: Dict[str, Any], step_index: int) -> List[str]:
+    """
+    验证代码节点配置的有效性
+    
+    Args:
+        step_data: 步骤配置字典
+        step_index: 步骤索引（用于错误信息）
+    
+    Returns:
+        错误列表
+    """
+    errors = []
+    step_id = step_data.get("id", f"步骤 {step_index}")
+    
+    # 检查是否有 code_config
+    if "code_config" in step_data:
+        code_config = step_data["code_config"]
+        if not isinstance(code_config, dict):
+            errors.append(f"{step_id}: code_config 必须是字典类型")
+            return errors
+        
+        # 验证 language
+        if "language" not in code_config:
+            errors.append(f"{step_id}: code_config 缺少 'language' 字段")
+        elif code_config["language"] not in ["javascript", "python"]:
+            errors.append(
+                f"{step_id}: 不支持的代码语言 '{code_config['language']}'。"
+                f"支持的语言: javascript, python"
+            )
+        
+        # 验证必须有 code 或 code_file
+        has_code = "code" in code_config and code_config["code"]
+        has_code_file = "code_file" in code_config and code_config["code_file"]
+        
+        if not has_code and not has_code_file:
+            errors.append(f"{step_id}: code_config 必须指定 'code'（内联代码）或 'code_file'（外部文件）之一")
+        
+        if has_code and has_code_file:
+            errors.append(f"{step_id}: code_config 不能同时指定 'code' 和 'code_file'")
+        
+        # 验证 timeout
+        if "timeout" in code_config:
+            timeout = code_config["timeout"]
+            if not isinstance(timeout, int):
+                errors.append(f"{step_id}: timeout 必须是整数")
+            elif timeout <= 0:
+                errors.append(f"{step_id}: timeout 必须是正整数")
+        
+        # 验证 env_vars
+        if "env_vars" in code_config:
+            env_vars = code_config["env_vars"]
+            if not isinstance(env_vars, dict):
+                errors.append(f"{step_id}: env_vars 必须是字典类型")
+    
+    else:
+        # 向后兼容：检查直接在 step 中的字段
+        if "language" not in step_data:
+            errors.append(f"{step_id}: 代码节点必须指定 'language' 字段")
+        elif step_data["language"] not in ["javascript", "python"]:
+            errors.append(
+                f"{step_id}: 不支持的代码语言 '{step_data['language']}'。"
+                f"支持的语言: javascript, python"
+            )
+        
+        has_code = "code" in step_data and step_data["code"]
+        has_code_file = "code_file" in step_data and step_data["code_file"]
+        
+        if not has_code and not has_code_file:
+            errors.append(f"{step_id}: 代码节点必须指定 'code'（内联代码）或 'code_file'（外部文件）之一")
+        
+        if has_code and has_code_file:
+            errors.append(f"{step_id}: 代码节点不能同时指定 'code' 和 'code_file'")
+    
+    return errors
+
+
 def validate_yaml_schema(data: Dict[str, Any]) -> List[str]:
     """验证 YAML 数据的基本 schema"""
     errors = []
@@ -290,18 +397,100 @@ def validate_yaml_schema(data: Dict[str, Any]) -> List[str]:
         if not isinstance(data["steps"], list):
             errors.append("字段 'steps' 必须是列表")
         else:
-            step_required_fields = ["id", "agent", "flow", "output_key"]
             for i, step in enumerate(data["steps"]):
                 if not isinstance(step, dict):
                     errors.append(f"步骤 {i} 必须是字典")
                     continue
                 
-                for field in step_required_fields:
-                    if field not in step:
-                        errors.append(f"步骤 {i} 缺少必需字段: {field}")
-                    elif not step[field]:
-                        errors.append(f"步骤 {i} 的字段 '{field}' 不能为空")
+                # 验证基本必需字段
+                if "id" not in step:
+                    errors.append(f"步骤 {i} 缺少必需字段: id")
+                elif not step["id"]:
+                    errors.append(f"步骤 {i} 的字段 'id' 不能为空")
                 
+                if "output_key" not in step:
+                    errors.append(f"步骤 {i} 缺少必需字段: output_key")
+                elif not step["output_key"]:
+                    errors.append(f"步骤 {i} 的字段 'output_key' 不能为空")
+                
+                # 根据步骤类型验证
+                step_type = step.get("type", "agent_flow")
+                
+                if step_type == "agent_flow":
+                    # Agent Flow 步骤需要 agent 和 flow 字段
+                    if "agent" not in step:
+                        errors.append(f"步骤 {i} (agent_flow) 缺少必需字段: agent")
+                    elif not step["agent"]:
+                        errors.append(f"步骤 {i} 的字段 'agent' 不能为空")
+                    
+                    if "flow" not in step:
+                        errors.append(f"步骤 {i} (agent_flow) 缺少必需字段: flow")
+                    elif not step["flow"]:
+                        errors.append(f"步骤 {i} 的字段 'flow' 不能为空")
+                
+                elif step_type == "code_node":
+                    # 验证代码节点配置
+                    code_errors = validate_code_node_config(step, i)
+                    errors.extend(code_errors)
+                
+                elif step_type == "batch_aggregator":
+                    # 验证批量聚合配置
+                    if "aggregation_strategy" not in step:
+                        errors.append(f"步骤 {i} (batch_aggregator) 缺少必需字段: aggregation_strategy")
+                    elif step["aggregation_strategy"] not in ["concat", "stats", "filter", "group", "summary", "custom"]:
+                        errors.append(
+                            f"步骤 {i}: 不支持的聚合策略 '{step['aggregation_strategy']}'。"
+                            f"支持的策略: concat, stats, filter, group, summary, custom"
+                        )
+                    
+                    # 验证策略特定字段
+                    aggregation_strategy = step.get("aggregation_strategy")
+                    
+                    if aggregation_strategy == "custom":
+                        # Accept either 'code', 'aggregation_code', or 'code_file'
+                        has_code = "code" in step or "aggregation_code" in step or "code_file" in step
+                        if not has_code:
+                            errors.append(f"步骤 {i}: 自定义聚合策略必须指定 'code', 'aggregation_code' 或 'code_file'")
+                        if "language" not in step:
+                            errors.append(f"步骤 {i}: 自定义聚合策略必须指定 'language' (python 或 javascript)")
+                    
+                    if aggregation_strategy == "stats" and "fields" not in step:
+                        errors.append(f"步骤 {i}: stats 聚合策略必须指定 'fields' 字段列表")
+                    
+                    if aggregation_strategy == "filter" and "condition" not in step:
+                        errors.append(f"步骤 {i}: filter 聚合策略必须指定 'condition' 过滤条件")
+                    
+                    if aggregation_strategy == "group" and "group_by" not in step:
+                        errors.append(f"步骤 {i}: group 聚合策略必须指定 'group_by' 分组字段")
+                    
+                    if aggregation_strategy == "summary" and "summary_fields" not in step:
+                        errors.append(f"步骤 {i}: summary 聚合策略必须指定 'summary_fields' 汇总字段列表")
+                
+                else:
+                    errors.append(
+                        f"步骤 {i}: 不支持的步骤类型 '{step_type}'。"
+                        f"支持的类型: agent_flow, code_node, batch_aggregator"
+                    )
+                
+                # 验证批量处理配置（适用于所有步骤类型）
+                if step.get("batch_mode", False):
+                    batch_size = step.get("batch_size", 10)
+                    max_workers = step.get("max_workers", 4)
+                    
+                    if not isinstance(batch_size, int):
+                        errors.append(f"步骤 {i}: 'batch_size' 必须是整数")
+                    elif batch_size <= 0:
+                        errors.append(f"步骤 {i}: 'batch_size' 必须是正整数")
+                    
+                    if not isinstance(max_workers, int):
+                        errors.append(f"步骤 {i}: 'max_workers' 必须是整数")
+                    elif max_workers <= 0:
+                        errors.append(f"步骤 {i}: 'max_workers' 必须是正整数")
+                    
+                    if "concurrent" in step and not isinstance(step["concurrent"], bool):
+                        errors.append(f"步骤 {i}: 'concurrent' 必须是布尔值")
+                
+                # 验证 input_mapping
                 if "input_mapping" in step and not isinstance(step["input_mapping"], dict):
                     errors.append(f"步骤 {i} 的 'input_mapping' 必须是字典")
     
@@ -538,16 +727,21 @@ def load_pipeline_config(pipeline_id: str) -> PipelineConfig:
 
 
 def find_pipeline_config_file(pipeline_id: str) -> Path:
-    """查找 pipeline 配置文件"""
-    # 优先查找 pipelines/{pipeline_id}.yaml
-    config_path = PIPELINES_DIR / f"{pipeline_id}.yaml"
-    if config_path.exists():
-        return config_path
-    
-    # 查找 pipelines/{pipeline_id}/pipeline.yaml
-    dir_config_path = PIPELINES_DIR / pipeline_id / "pipeline.yaml"
-    if dir_config_path.exists():
-        return dir_config_path
+    """查找 pipeline 配置文件（支持多目录）"""
+    # 在多个目录中查找
+    for base_dir in PIPELINE_DIRS:
+        if not base_dir.exists():
+            continue
+        
+        # 查找 {base_dir}/{pipeline_id}.yaml
+        config_path = base_dir / f"{pipeline_id}.yaml"
+        if config_path.exists():
+            return config_path
+        
+        # 查找 {base_dir}/{pipeline_id}/pipeline.yaml
+        dir_config_path = base_dir / pipeline_id / "pipeline.yaml"
+        if dir_config_path.exists():
+            return dir_config_path
     
     available_pipelines = list_available_pipelines()
     suggestion = f"可用的 pipelines: {', '.join(available_pipelines)}" if available_pipelines else "请先创建 pipeline 配置文件"
@@ -558,22 +752,23 @@ def find_pipeline_config_file(pipeline_id: str) -> Path:
 
 
 def list_available_pipelines() -> List[str]:
-    """列出所有可用的 pipeline ID"""
-    if not PIPELINES_DIR.exists():
-        return []
+    """列出所有可用的 pipeline ID（支持多目录）"""
+    pipeline_ids = set()
     
-    pipeline_ids = []
-    
-    # 查找 pipelines/{pipeline_id}.yaml 文件
-    for yaml_file in PIPELINES_DIR.glob("*.yaml"):
-        pipeline_ids.append(yaml_file.stem)
-    
-    # 查找 pipelines/{pipeline_id}/pipeline.yaml 文件
-    for pipeline_dir in PIPELINES_DIR.iterdir():
-        if (pipeline_dir.is_dir() and 
-            (pipeline_dir / "pipeline.yaml").exists() and 
-            pipeline_dir.name not in pipeline_ids):
-            pipeline_ids.append(pipeline_dir.name)
+    # 遍历所有 Pipeline 目录
+    for base_dir in PIPELINE_DIRS:
+        if not base_dir.exists():
+            continue
+        
+        # 查找 {base_dir}/{pipeline_id}.yaml 文件
+        for yaml_file in base_dir.glob("*.yaml"):
+            pipeline_ids.add(yaml_file.stem)
+        
+        # 查找 {base_dir}/{pipeline_id}/pipeline.yaml 文件
+        for pipeline_dir in base_dir.iterdir():
+            if (pipeline_dir.is_dir() and 
+                (pipeline_dir / "pipeline.yaml").exists()):
+                pipeline_ids.add(pipeline_dir.name)
     
     return sorted(pipeline_ids)
 

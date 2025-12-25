@@ -14,11 +14,15 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .models import PipelineConfig, StepConfig, VariantConfig, EvaluationResult
+from .models import PipelineConfig, StepConfig, VariantConfig, EvaluationResult, CodeNodeConfig
 from .chains import run_flow_with_tokens
 from .agent_registry import load_agent
 from .progress_tracker import PipelineProgressTracker
 from .checkpoint_manager import CheckpointManager, ResumableExecutor
+from .code_executor import CodeExecutor, ExecutionResult as CodeExecutionResult
+from .dependency_analyzer import DependencyAnalyzer, DependencyGraph
+from .concurrent_executor import ConcurrentExecutor, Task, TaskResult
+from .batch_aggregator import BatchAggregator, AggregationResult
 from .error_handler import (
     ErrorHandler, create_config_error, create_execution_error, 
     create_data_error, handle_error
@@ -180,17 +184,27 @@ class PipelineExecutionError(Exception):
 class PipelineRunner:
     """Pipeline 执行器"""
     
-    def __init__(self, config: PipelineConfig):
+    def __init__(self, config: PipelineConfig, enable_concurrent: bool = True, max_workers: int = 4):
         """
         初始化 Pipeline 执行器
         
         Args:
             config: Pipeline 配置对象
+            enable_concurrent: 是否启用并发执行（默认True）
+            max_workers: 最大并发工作线程数（默认4）
         """
         self.config = config
         self.context: Dict[str, Any] = {}
         self.progress_callback: Optional[callable] = None
         self.error_handler = ErrorHandler()
+        self.code_executor = CodeExecutor(default_timeout=30)  # 初始化代码执行器
+        self.batch_aggregator = BatchAggregator()  # 初始化批量聚合器
+        
+        # 并发执行相关
+        self.enable_concurrent = enable_concurrent
+        self.max_workers = max_workers
+        self.dependency_analyzer = DependencyAnalyzer()
+        self.concurrent_executor = ConcurrentExecutor(max_workers=max_workers, strategy="thread")
         
         # 验证配置
         validation_errors = config.validate()
@@ -338,6 +352,8 @@ class PipelineRunner:
         Args:
             sample: 测试样本数据
             variant: 变体名称
+            progress_tracker: 进度跟踪器
+            sample_index: 样本索引
             
         Returns:
             Pipeline 执行结果
@@ -361,55 +377,342 @@ class PipelineRunner:
             # 获取变体配置
             variant_config = self._get_variant_config(variant)
             
-            # 执行每个步骤
-            failed_outputs = set()  # 跟踪失败步骤的输出
+            # 根据是否启用并发执行选择不同的执行策略
+            if self.enable_concurrent:
+                # 使用并发执行调度
+                result = self._execute_sample_concurrent(
+                    sample=sample,
+                    sample_id=sample_id,
+                    variant=variant,
+                    variant_config=variant_config,
+                    progress_tracker=progress_tracker,
+                    sample_index=sample_index,
+                    start_time=start_time
+                )
+            else:
+                # 使用顺序执行（原有逻辑）
+                result = self._execute_sample_sequential(
+                    sample=sample,
+                    sample_id=sample_id,
+                    variant=variant,
+                    variant_config=variant_config,
+                    progress_tracker=progress_tracker,
+                    sample_index=sample_index,
+                    start_time=start_time
+                )
             
-            for step_index, step in enumerate(self.config.steps):
-                # 更新进度（开始执行步骤）
-                if progress_tracker:
-                    progress_tracker.update_sample(sample_index, sample_id, step_index, step.id)
+        except Exception as e:
+            result.error = str(e)
+            result.total_execution_time = time.time() - start_time
+            logger.error(f"样本 {sample_id} 执行失败: {e}")
+        
+        return result
+    
+    def _execute_sample_sequential(
+        self,
+        sample: Dict[str, Any],
+        sample_id: str,
+        variant: str,
+        variant_config: Optional[VariantConfig],
+        progress_tracker: Optional[PipelineProgressTracker],
+        sample_index: int,
+        start_time: float
+    ) -> PipelineResult:
+        """
+        顺序执行样本的 Pipeline 流程（原有逻辑）
+        
+        Args:
+            sample: 测试样本数据
+            sample_id: 样本ID
+            variant: 变体名称
+            variant_config: 变体配置
+            progress_tracker: 进度跟踪器
+            sample_index: 样本索引
+            start_time: 开始时间
+            
+        Returns:
+            Pipeline 执行结果
+        """
+        result = PipelineResult(
+            sample_id=sample_id,
+            variant=variant
+        )
+        
+        # 执行每个步骤
+        failed_outputs = set()  # 跟踪失败步骤的输出
+        
+        for step_index, step in enumerate(self.config.steps):
+            # 更新进度（开始执行步骤）
+            if progress_tracker:
+                progress_tracker.update_sample(sample_index, sample_id, step_index, step.id)
+            
+            # 检查此步骤是否依赖失败的步骤
+            dependencies = step.get_dependencies()
+            has_failed_dependency = any(dep in failed_outputs for dep in dependencies)
+            
+            if has_failed_dependency:
+                # 跳过此步骤，因为它依赖的步骤失败了
+                logger.warning(f"跳过步骤 '{step.id}'，因为它依赖的步骤失败了")
+                skipped_result = StepResult(
+                    step_id=step.id,
+                    output_key=step.output_key,
+                    output_value="",
+                    execution_time=0.0,
+                    error="依赖的步骤失败，跳过执行",
+                    success=False
+                )
+                result.step_results.append(skipped_result)
+                failed_outputs.add(step.output_key)
+                continue
+            
+            # 执行步骤
+            step_result = self.execute_step(step, variant_config)
+            result.step_results.append(step_result)
+            
+            # 如果步骤执行失败
+            if not step_result.success:
+                failed_outputs.add(step_result.output_key)
                 
-                # 检查此步骤是否依赖失败的步骤
-                dependencies = step.get_dependencies()
-                has_failed_dependency = any(dep in failed_outputs for dep in dependencies)
-                
-                if has_failed_dependency:
-                    # 跳过此步骤，因为它依赖的步骤失败了
-                    logger.warning(f"跳过步骤 '{step.id}'，因为它依赖的步骤失败了")
-                    skipped_result = StepResult(
+                # 如果是必需步骤，停止整个 Pipeline
+                if step.required:
+                    raise create_execution_error(
+                        message=f"必需步骤 '{step.id}' 执行失败: {step_result.error}",
+                        suggestion="请检查步骤配置和输入数据",
                         step_id=step.id,
-                        output_key=step.output_key,
-                        output_value="",
-                        execution_time=0.0,
-                        error="依赖的步骤失败，跳过执行",
-                        success=False
+                        sample_id=sample_id
                     )
-                    result.step_results.append(skipped_result)
-                    failed_outputs.add(step.output_key)
+                else:
+                    # 可选步骤失败，记录警告但继续执行
+                    logger.warning(f"可选步骤 '{step.id}' 执行失败: {step_result.error}")
+            else:
+                # 将步骤输出添加到上下文
+                self.context[step_result.output_key] = step_result.output_value
+        
+        # 收集最终输出
+        result.final_outputs = self._collect_final_outputs()
+        
+        # 计算总执行时间、token使用量和parser统计
+        result.total_execution_time = time.time() - start_time
+        result.total_token_usage = self._calculate_total_token_usage(result.step_results)
+        result.total_parser_stats = self._aggregate_parser_stats(result.step_results)
+        
+        return result
+    
+    def _execute_sample_concurrent(
+        self,
+        sample: Dict[str, Any],
+        sample_id: str,
+        variant: str,
+        variant_config: Optional[VariantConfig],
+        progress_tracker: Optional[PipelineProgressTracker],
+        sample_index: int,
+        start_time: float
+    ) -> PipelineResult:
+        """
+        并发执行样本的 Pipeline 流程
+        
+        实现依赖关系分析、并发组调度、同步点等待和最大并发数控制
+        
+        Args:
+            sample: 测试样本数据
+            sample_id: 样本ID
+            variant: 变体名称
+            variant_config: 变体配置
+            progress_tracker: 进度跟踪器
+            sample_index: 样本索引
+            start_time: 开始时间
+            
+        Returns:
+            Pipeline 执行结果
+        """
+        result = PipelineResult(
+            sample_id=sample_id,
+            variant=variant
+        )
+        
+        try:
+            # 1. 分析依赖关系
+            logger.debug(f"分析 Pipeline 步骤依赖关系")
+            dependency_graph = self.dependency_analyzer.analyze_dependencies(self.config.steps)
+            
+            # 2. 识别并发组
+            logger.debug(f"识别可并发执行的步骤组")
+            concurrent_groups = self.dependency_analyzer.find_concurrent_groups(dependency_graph)
+            
+            logger.info(f"Pipeline 将分 {len(concurrent_groups)} 个批次执行")
+            for i, group in enumerate(concurrent_groups):
+                logger.debug(f"  批次 {i+1}: {', '.join(group)} ({len(group)} 个步骤)")
+            
+            # 创建步骤ID到步骤对象的映射
+            step_map = {step.id: step for step in self.config.steps}
+            
+            # 跟踪已完成和失败的步骤
+            completed_steps: Dict[str, StepResult] = {}
+            failed_outputs = set()
+            
+            # 3. 按批次执行并发组（实现同步点等待）
+            for group_index, group_step_ids in enumerate(concurrent_groups):
+                logger.debug(f"开始执行批次 {group_index + 1}/{len(concurrent_groups)}")
+                
+                # 创建当前批次的任务列表
+                tasks = []
+                skipped_steps = []
+                
+                for step_id in group_step_ids:
+                    step = step_map[step_id]
+                    
+                    # 检查依赖是否满足
+                    dependencies = step.depends_on
+                    # 也检查 input_mapping 中的依赖
+                    for source in step.input_mapping.values():
+                        # 找到产生这个输出的步骤
+                        for other_step in self.config.steps:
+                            if other_step.output_key == source and other_step.id not in dependencies:
+                                dependencies.append(other_step.id)
+                    
+                    # 检查是否有必需的依赖失败了
+                    has_failed_dependency = False
+                    for dep_id in dependencies:
+                        if dep_id in completed_steps:
+                            dep_result = completed_steps[dep_id]
+                            if not dep_result.success and step_map[dep_id].required:
+                                has_failed_dependency = True
+                                break
+                    
+                    if has_failed_dependency:
+                        # 跳过此步骤
+                        logger.warning(f"跳过步骤 '{step.id}'，因为必需的依赖步骤失败了")
+                        skipped_result = StepResult(
+                            step_id=step.id,
+                            output_key=step.output_key,
+                            output_value="",
+                            execution_time=0.0,
+                            error="必需的依赖步骤失败，跳过执行",
+                            success=False
+                        )
+                        completed_steps[step.id] = skipped_result
+                        failed_outputs.add(step.output_key)
+                        skipped_steps.append(step.id)
+                        continue
+                    
+                    # 创建任务
+                    task = Task(
+                        id=step.id,
+                        func=self._execute_step_wrapper,
+                        args=(step, variant_config),
+                        kwargs={},
+                        dependencies=[],  # 同一批次内的任务没有依赖关系
+                        required=step.required,
+                        metadata={"step": step}
+                    )
+                    tasks.append(task)
+                
+                # 如果当前批次没有任务（都被跳过了），继续下一批次
+                if not tasks:
+                    logger.debug(f"批次 {group_index + 1} 的所有步骤都被跳过")
                     continue
                 
-                # 执行步骤
-                step_result = self.execute_step(step, variant_config)
-                result.step_results.append(step_result)
+                # 4. 并发执行当前批次的任务（实现最大并发数控制）
+                logger.debug(f"并发执行批次 {group_index + 1} 的 {len(tasks)} 个任务（最大并发数: {self.max_workers}）")
                 
-                # 如果步骤执行失败
-                if not step_result.success:
-                    failed_outputs.add(step_result.output_key)
-                    
-                    # 如果是必需步骤，停止整个 Pipeline
-                    if step.required:
-                        raise create_execution_error(
-                            message=f"必需步骤 '{step.id}' 执行失败: {step_result.error}",
-                            suggestion="请检查步骤配置和输入数据",
-                            step_id=step.id,
-                            sample_id=sample_id
+                # 创建进度回调函数，将并发执行进度传递给 PipelineProgressTracker
+                def concurrent_progress_callback(exec_progress):
+                    """并发执行进度回调"""
+                    if progress_tracker:
+                        # 计算当前样本的整体进度
+                        # 已完成的批次数 + 当前批次的进度
+                        completed_batches = group_index
+                        current_batch_progress = exec_progress.completion_rate
+                        
+                        # 计算总体步骤进度（近似）
+                        total_batches = len(concurrent_groups)
+                        overall_progress = (completed_batches + current_batch_progress) / total_batches
+                        
+                        # 更新进度跟踪器
+                        # 使用当前批次中正在执行的任务作为当前步骤
+                        current_step_name = f"批次 {group_index + 1}/{total_batches}"
+                        if exec_progress.running > 0:
+                            current_step_name += f" (并发执行 {exec_progress.running} 个任务)"
+                        
+                        progress_tracker.update_sample(
+                            sample_index=sample_index,
+                            sample_id=sample_id,
+                            step_index=int(overall_progress * len(self.config.steps)),
+                            step_name=current_step_name,
+                            failed=False
                         )
+                
+                # 使用 ConcurrentExecutor 执行任务
+                task_results = self.concurrent_executor.execute_concurrent(
+                    tasks=tasks,
+                    progress_callback=concurrent_progress_callback
+                )
+                
+                # 处理任务结果
+                for task_result in task_results:
+                    step_id = task_result.task_id
+                    step = step_map[step_id]
+                    
+                    if task_result.success:
+                        # 任务成功，提取 StepResult
+                        step_result = task_result.result
+                        completed_steps[step_id] = step_result
+                        
+                        # 将步骤输出添加到上下文
+                        self.context[step_result.output_key] = step_result.output_value
+                        
+                        logger.debug(f"步骤 '{step_id}' 执行成功")
                     else:
-                        # 可选步骤失败，记录警告但继续执行
-                        logger.warning(f"可选步骤 '{step.id}' 执行失败: {step_result.error}")
-                else:
-                    # 将步骤输出添加到上下文
-                    self.context[step_result.output_key] = step_result.output_value
+                        # 任务失败
+                        logger.warning(f"步骤 '{step_id}' 执行失败: {task_result.error}")
+                        
+                        # 检查是否是 StepResult（execute_step 返回的）
+                        if isinstance(task_result.result, StepResult):
+                            step_result = task_result.result
+                        else:
+                            step_result = StepResult(
+                                step_id=step_id,
+                                output_key=step.output_key,
+                                output_value="",
+                                execution_time=task_result.execution_time,
+                                error=task_result.error,
+                                success=False
+                            )
+                        
+                        completed_steps[step_id] = step_result
+                        failed_outputs.add(step.output_key)
+                        
+                        # 如果是必需步骤，停止整个 Pipeline
+                        if step.required:
+                            # 先收集已完成的步骤结果
+                            for s in self.config.steps:
+                                if s.id in completed_steps:
+                                    result.step_results.append(completed_steps[s.id])
+                            
+                            raise create_execution_error(
+                                message=f"必需步骤 '{step_id}' 执行失败: {step_result.error}",
+                                suggestion="请检查步骤配置和输入数据",
+                                step_id=step_id,
+                                sample_id=sample_id
+                            )
+                
+                logger.debug(f"批次 {group_index + 1} 执行完成")
+            
+            # 按原始步骤顺序收集结果
+            for step in self.config.steps:
+                if step.id in completed_steps:
+                    result.step_results.append(completed_steps[step.id])
+            
+            # 检查是否有必需步骤失败
+            for step_result in result.step_results:
+                step = step_map[step_result.step_id]
+                if not step_result.success and step.required:
+                    raise create_execution_error(
+                        message=f"必需步骤 '{step_result.step_id}' 执行失败: {step_result.error}",
+                        suggestion="请检查步骤配置和输入数据",
+                        step_id=step_result.step_id,
+                        sample_id=sample_id
+                    )
             
             # 收集最终输出
             result.final_outputs = self._collect_final_outputs()
@@ -419,12 +722,29 @@ class PipelineRunner:
             result.total_token_usage = self._calculate_total_token_usage(result.step_results)
             result.total_parser_stats = self._aggregate_parser_stats(result.step_results)
             
+            logger.info(f"样本 {sample_id} 并发执行完成，总耗时 {result.total_execution_time:.2f}秒")
+            
         except Exception as e:
             result.error = str(e)
             result.total_execution_time = time.time() - start_time
-            logger.error(f"样本 {sample_id} 执行失败: {e}")
+            logger.error(f"样本 {sample_id} 并发执行失败: {e}")
         
         return result
+    
+    def _execute_step_wrapper(self, step: StepConfig, variant_config: Optional[VariantConfig]) -> StepResult:
+        """
+        步骤执行包装器，用于并发执行
+        
+        这个方法会被 ConcurrentExecutor 调用，需要返回 StepResult
+        
+        Args:
+            step: 步骤配置
+            variant_config: 变体配置
+            
+        Returns:
+            StepResult: 步骤执行结果
+        """
+        return self.execute_step(step, variant_config)
     
     def execute_step(self, step: StepConfig, variant_config: Optional[VariantConfig] = None) -> StepResult:
         """
@@ -443,30 +763,97 @@ class PipelineRunner:
             # 解析输入映射
             step_inputs = self._resolve_input_mapping(step.input_mapping)
             
-            # 获取实际使用的 flow 和 model
-            flow_name, model_override = self._resolve_step_config(step, variant_config)
+            # 根据步骤类型执行不同的逻辑
+            if step.type == "code_node":
+                # 执行代码节点
+                logger.debug(f"执行代码节点步骤 '{step.id}'")
+                output_content, execution_time = self._execute_code_node(
+                    step=step,
+                    inputs=step_inputs,
+                    start_time=step_start_time
+                )
+                
+                return StepResult(
+                    step_id=step.id,
+                    output_key=step.output_key,
+                    output_value=output_content,
+                    execution_time=execution_time,
+                    token_usage={},  # 代码节点不使用 token
+                    parser_stats=None,
+                    success=True
+                )
             
-            logger.debug(f"执行步骤 '{step.id}': agent={step.agent}, flow={flow_name}")
+            elif step.type == "batch_aggregator":
+                # 执行批量聚合步骤
+                logger.debug(f"执行批量聚合步骤 '{step.id}'")
+                output_content, execution_time = self._execute_batch_aggregator(
+                    step=step,
+                    inputs=step_inputs,
+                    start_time=step_start_time
+                )
+                
+                return StepResult(
+                    step_id=step.id,
+                    output_key=step.output_key,
+                    output_value=output_content,
+                    execution_time=execution_time,
+                    token_usage={},  # 批量聚合不使用 token
+                    parser_stats=None,
+                    success=True
+                )
             
-            # 执行 Agent/Flow
-            output_content, token_usage, parser_stats = self._execute_agent_flow(
-                agent_id=step.agent,
-                flow_name=flow_name,
-                inputs=step_inputs,
-                model_override=model_override
-            )
+            elif step.type == "agent_flow":
+                # 检查是否是批量模式
+                if step.batch_mode:
+                    # 执行批量 Agent/Flow
+                    logger.debug(f"执行批量 Agent/Flow 步骤 '{step.id}'")
+                    output_content, token_usage, parser_stats, execution_time = self._execute_batch_agent_flow(
+                        step=step,
+                        inputs=step_inputs,
+                        variant_config=variant_config,
+                        start_time=step_start_time
+                    )
+                    
+                    return StepResult(
+                        step_id=step.id,
+                        output_key=step.output_key,
+                        output_value=output_content,
+                        execution_time=execution_time,
+                        token_usage=token_usage,
+                        parser_stats=parser_stats,
+                        success=True
+                    )
+                else:
+                    # 执行单个 Agent/Flow
+                    flow_name, model_override = self._resolve_step_config(step, variant_config)
+                    
+                    logger.debug(f"执行步骤 '{step.id}': agent={step.agent}, flow={flow_name}")
+                    
+                    output_content, token_usage, parser_stats = self._execute_agent_flow(
+                        agent_id=step.agent,
+                        flow_name=flow_name,
+                        inputs=step_inputs,
+                        model_override=model_override
+                    )
+                    
+                    execution_time = time.time() - step_start_time
+                    
+                    return StepResult(
+                        step_id=step.id,
+                        output_key=step.output_key,
+                        output_value=output_content,
+                        execution_time=execution_time,
+                        token_usage=token_usage,
+                        parser_stats=parser_stats,
+                        success=True
+                    )
             
-            execution_time = time.time() - step_start_time
-            
-            return StepResult(
-                step_id=step.id,
-                output_key=step.output_key,
-                output_value=output_content,
-                execution_time=execution_time,
-                token_usage=token_usage,
-                parser_stats=parser_stats,
-                success=True
-            )
+            else:
+                # 不支持的步骤类型
+                raise create_config_error(
+                    message=f"不支持的步骤类型: {step.type}",
+                    suggestion="支持的步骤类型: agent_flow, code_node, batch_aggregator"
+                )
             
         except Exception as e:
             execution_time = time.time() - step_start_time
@@ -597,6 +984,451 @@ class PipelineRunner:
                 message=f"执行 Agent/Flow 失败: {str(e)}",
                 suggestion="请检查 Agent 配置、Flow 定义和网络连接"
             ) from e
+    
+    def _execute_code_node(self, step: StepConfig, inputs: Dict[str, Any], start_time: float) -> Tuple[Any, float]:
+        """
+        执行代码节点
+        
+        Args:
+            step: 步骤配置
+            inputs: 输入数据
+            start_time: 步骤开始时间
+            
+        Returns:
+            (输出内容, 执行时间) 元组
+            
+        Raises:
+            Exception: 如果代码执行失败
+        """
+        try:
+            # 获取代码节点配置
+            code_config = step.code_config
+            
+            # 向后兼容：如果没有 code_config，从 step 直接字段构建
+            if not code_config:
+                code_config = CodeNodeConfig(
+                    language=step.language or "python",
+                    code=step.code,
+                    code_file=step.code_file,
+                    timeout=step.timeout or 30,
+                    env_vars={}
+                )
+            
+            # 验证配置
+            validation_errors = code_config.validate()
+            if validation_errors:
+                raise create_config_error(
+                    message=f"代码节点配置无效: {', '.join(validation_errors)}",
+                    suggestion="请检查代码节点的 language、code 或 code_file 配置"
+                )
+            
+            # 执行代码
+            if code_config.code_file:
+                # 从文件执行
+                code_file_path = Path(code_config.code_file)
+                logger.debug(f"从文件执行代码: {code_file_path}")
+                
+                result = self.code_executor.execute_from_file(
+                    file_path=code_file_path,
+                    language=code_config.language,
+                    inputs=inputs,
+                    timeout=code_config.timeout
+                )
+            else:
+                # 执行内联代码
+                logger.debug(f"执行内联 {code_config.language} 代码")
+                
+                result = self.code_executor.execute(
+                    code=code_config.code,
+                    language=code_config.language,
+                    inputs=inputs,
+                    timeout=code_config.timeout
+                )
+            
+            # 检查执行结果
+            if not result.success:
+                error_details = []
+                error_details.append(f"错误: {result.error}")
+                
+                if result.stderr:
+                    error_details.append(f"标准错误: {result.stderr}")
+                
+                if result.stack_trace:
+                    error_details.append(f"堆栈跟踪:\n{result.stack_trace}")
+                
+                if result.timeout:
+                    error_details.append(f"执行超时 ({code_config.timeout}秒)")
+                
+                raise create_execution_error(
+                    message=f"代码节点执行失败:\n" + "\n".join(error_details),
+                    suggestion="请检查代码逻辑、输入数据格式和超时设置",
+                    step_id=step.id
+                )
+            
+            execution_time = time.time() - start_time
+            logger.debug(f"代码节点执行成功，耗时 {execution_time:.2f}秒")
+            
+            return result.output, execution_time
+            
+        except Exception as e:
+            # 如果是我们自己抛出的错误，直接传递
+            if isinstance(e, type(create_execution_error("", ""))):
+                raise
+            
+            # 其他异常，包装后抛出
+            raise create_execution_error(
+                message=f"代码节点执行过程中出现异常: {str(e)}",
+                suggestion="请检查代码节点配置和代码逻辑",
+                step_id=step.id
+            ) from e
+    
+    def _execute_batch_aggregator(self, step: StepConfig, inputs: Dict[str, Any], start_time: float) -> Tuple[Any, float]:
+        """
+        执行批量聚合步骤
+        
+        Args:
+            step: 步骤配置
+            inputs: 输入数据（应包含要聚合的items）
+            start_time: 步骤开始时间
+            
+        Returns:
+            (聚合结果, 执行时间) 元组
+            
+        Raises:
+            Exception: 如果聚合失败
+        """
+        try:
+            # 获取要聚合的items
+            items = inputs.get("items", [])
+            
+            if not items:
+                logger.warning(f"批量聚合步骤 '{step.id}' 没有收到任何items")
+                return [], time.time() - start_time
+            
+            # 确保items是列表
+            if not isinstance(items, list):
+                items = [items]
+            
+            logger.info(f"批量聚合步骤 '{step.id}': 聚合 {len(items)} 个items，策略={step.aggregation_strategy}")
+            
+            # 准备聚合参数
+            kwargs = {}
+            
+            if step.aggregation_strategy == "concat":
+                kwargs["separator"] = step.separator or "\n"
+            elif step.aggregation_strategy == "stats":
+                kwargs["fields"] = step.fields or []
+            elif step.aggregation_strategy == "filter":
+                kwargs["condition"] = step.condition
+            elif step.aggregation_strategy == "group":
+                kwargs["group_by"] = step.group_by
+            elif step.aggregation_strategy == "summary":
+                kwargs["summary_fields"] = step.summary_fields or []
+            elif step.aggregation_strategy == "custom":
+                # 自定义聚合使用代码
+                code = step.aggregation_code or step.code
+                if not code and step.code_file:
+                    # 从文件读取代码
+                    from pathlib import Path
+                    code_file_path = Path(step.code_file)
+                    if code_file_path.exists():
+                        code = code_file_path.read_text()
+                    else:
+                        raise create_config_error(
+                            message=f"代码文件不存在: {step.code_file}",
+                            suggestion="请检查 code_file 路径是否正确"
+                        )
+                
+                kwargs["code"] = code
+                kwargs["language"] = step.language or "python"
+                kwargs["timeout"] = step.timeout or 30
+            
+            # 执行聚合
+            result = self.batch_aggregator.aggregate(
+                items=items,
+                strategy=step.aggregation_strategy,
+                **kwargs
+            )
+            
+            # 检查聚合结果
+            if not result.success:
+                raise create_execution_error(
+                    message=f"批量聚合失败: {result.error}",
+                    suggestion="请检查聚合策略配置和输入数据格式",
+                    step_id=step.id
+                )
+            
+            execution_time = time.time() - start_time
+            logger.info(f"批量聚合步骤 '{step.id}' 完成，耗时 {execution_time:.2f}秒")
+            
+            return result.result, execution_time
+            
+        except Exception as e:
+            # 如果是我们自己抛出的错误，直接传递
+            if isinstance(e, type(create_execution_error("", ""))):
+                raise
+            
+            # 其他异常，包装后抛出
+            raise create_execution_error(
+                message=f"批量聚合步骤执行过程中出现异常: {str(e)}",
+                suggestion="请检查聚合配置和输入数据",
+                step_id=step.id
+            ) from e
+    
+    def _execute_batch_agent_flow(
+        self, 
+        step: StepConfig, 
+        inputs: Dict[str, Any], 
+        variant_config: Optional[VariantConfig],
+        start_time: float
+    ) -> Tuple[List[Any], Dict[str, int], Optional[Dict[str, Any]], float]:
+        """
+        执行批量 Agent/Flow 步骤
+        
+        Args:
+            step: 步骤配置
+            inputs: 输入数据
+            variant_config: 变体配置
+            start_time: 步骤开始时间
+            
+        Returns:
+            (批量输出列表, 总token使用量, 聚合parser统计, 执行时间) 元组
+            
+        Raises:
+            Exception: 如果批量执行失败
+        """
+        try:
+            # 解析步骤配置
+            flow_name, model_override = self._resolve_step_config(step, variant_config)
+            
+            # 获取批量数据
+            # 批量数据应该是一个列表，每个元素是一个输入字典
+            batch_data = []
+            
+            # 检查inputs中是否有列表类型的数据
+            for param_name, value in inputs.items():
+                if isinstance(value, list):
+                    # 找到列表数据，为每个元素创建输入字典
+                    for item in value:
+                        item_inputs = {}
+                        # 将当前item作为该参数的值
+                        item_inputs[param_name] = item
+                        # 添加其他非列表参数
+                        for other_param, other_value in inputs.items():
+                            if other_param != param_name and not isinstance(other_value, list):
+                                item_inputs[other_param] = other_value
+                        batch_data.append(item_inputs)
+                    break
+            
+            # 如果没有找到列表数据，将整个inputs作为单个批次项
+            if not batch_data:
+                batch_data = [inputs]
+            
+            logger.info(f"批量执行步骤 '{step.id}': {len(batch_data)} 个items, batch_size={step.batch_size}, concurrent={step.concurrent}")
+            
+            # 分批处理
+            batch_size = step.batch_size or 10
+            all_results = []
+            total_token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            all_parser_stats = []
+            
+            # 将数据分成批次
+            batches = [batch_data[i:i + batch_size] for i in range(0, len(batch_data), batch_size)]
+            
+            logger.info(f"将 {len(batch_data)} 个items分成 {len(batches)} 个批次")
+            
+            for batch_index, batch in enumerate(batches):
+                logger.debug(f"处理批次 {batch_index + 1}/{len(batches)}, 包含 {len(batch)} 个items")
+                
+                if step.concurrent:
+                    # 并发执行批次
+                    batch_results = self._execute_batch_concurrent(
+                        agent_id=step.agent,
+                        flow_name=flow_name,
+                        batch_items=batch,
+                        model_override=model_override,
+                        max_workers=step.max_workers or 4
+                    )
+                else:
+                    # 顺序执行批次
+                    batch_results = self._execute_batch_sequential(
+                        agent_id=step.agent,
+                        flow_name=flow_name,
+                        batch_items=batch,
+                        model_override=model_override
+                    )
+                
+                # 收集结果
+                for result in batch_results:
+                    all_results.append(result["output"])
+                    
+                    # 累加token使用量
+                    if "token_usage" in result:
+                        for key in total_token_usage:
+                            total_token_usage[key] += result["token_usage"].get(key, 0)
+                    
+                    # 收集parser统计
+                    if "parser_stats" in result and result["parser_stats"]:
+                        all_parser_stats.append(result["parser_stats"])
+            
+            # 聚合parser统计
+            aggregated_parser_stats = None
+            if all_parser_stats:
+                aggregated_parser_stats = {
+                    "success_count": sum(s.get("success_count", 0) for s in all_parser_stats),
+                    "failure_count": sum(s.get("failure_count", 0) for s in all_parser_stats),
+                    "total_retry_count": sum(s.get("total_retry_count", 0) for s in all_parser_stats)
+                }
+                total_attempts = aggregated_parser_stats["success_count"] + aggregated_parser_stats["failure_count"]
+                if total_attempts > 0:
+                    aggregated_parser_stats["success_rate"] = aggregated_parser_stats["success_count"] / total_attempts
+                    aggregated_parser_stats["average_retries"] = aggregated_parser_stats["total_retry_count"] / total_attempts
+            
+            execution_time = time.time() - start_time
+            logger.info(f"批量执行步骤 '{step.id}' 完成，处理了 {len(all_results)} 个items，耗时 {execution_time:.2f}秒")
+            
+            return all_results, total_token_usage, aggregated_parser_stats, execution_time
+            
+        except Exception as e:
+            # 如果是我们自己抛出的错误，直接传递
+            if isinstance(e, type(create_execution_error("", ""))):
+                raise
+            
+            # 其他异常，包装后抛出
+            raise create_execution_error(
+                message=f"批量执行步骤过程中出现异常: {str(e)}",
+                suggestion="请检查批量配置和输入数据",
+                step_id=step.id
+            ) from e
+    
+    def _execute_batch_concurrent(
+        self,
+        agent_id: str,
+        flow_name: str,
+        batch_items: List[Dict[str, Any]],
+        model_override: Optional[str],
+        max_workers: int
+    ) -> List[Dict[str, Any]]:
+        """
+        并发执行批量items
+        
+        Args:
+            agent_id: Agent ID
+            flow_name: Flow 名称
+            batch_items: 批量输入数据列表
+            model_override: 模型覆盖
+            max_workers: 最大并发数
+            
+        Returns:
+            批量结果列表
+        """
+        # 创建任务列表
+        tasks = []
+        for i, item_inputs in enumerate(batch_items):
+            task = Task(
+                id=f"batch_item_{i}",
+                func=self._execute_agent_flow_wrapper,
+                args=(agent_id, flow_name, item_inputs, model_override),
+                kwargs={},
+                dependencies=[],
+                required=True,
+                metadata={"item_index": i}
+            )
+            tasks.append(task)
+        
+        # 使用并发执行器执行
+        task_results = self.concurrent_executor.execute_concurrent(
+            tasks=tasks,
+            progress_callback=None
+        )
+        
+        # 收集结果
+        results = []
+        for task_result in task_results:
+            if task_result.success:
+                output_content, token_usage, parser_stats = task_result.result
+                results.append({
+                    "output": output_content,
+                    "token_usage": token_usage,
+                    "parser_stats": parser_stats
+                })
+            else:
+                # 批量执行中的单个item失败，记录错误但继续
+                logger.warning(f"批量item {task_result.task_id} 执行失败: {task_result.error}")
+                results.append({
+                    "output": "",
+                    "token_usage": {},
+                    "parser_stats": None,
+                    "error": task_result.error
+                })
+        
+        return results
+    
+    def _execute_batch_sequential(
+        self,
+        agent_id: str,
+        flow_name: str,
+        batch_items: List[Dict[str, Any]],
+        model_override: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        顺序执行批量items
+        
+        Args:
+            agent_id: Agent ID
+            flow_name: Flow 名称
+            batch_items: 批量输入数据列表
+            model_override: 模型覆盖
+            
+        Returns:
+            批量结果列表
+        """
+        results = []
+        for i, item_inputs in enumerate(batch_items):
+            try:
+                output_content, token_usage, parser_stats = self._execute_agent_flow(
+                    agent_id=agent_id,
+                    flow_name=flow_name,
+                    inputs=item_inputs,
+                    model_override=model_override
+                )
+                results.append({
+                    "output": output_content,
+                    "token_usage": token_usage,
+                    "parser_stats": parser_stats
+                })
+            except Exception as e:
+                # 批量执行中的单个item失败，记录错误但继续
+                logger.warning(f"批量item {i} 执行失败: {str(e)}")
+                results.append({
+                    "output": "",
+                    "token_usage": {},
+                    "parser_stats": None,
+                    "error": str(e)
+                })
+        
+        return results
+    
+    def _execute_agent_flow_wrapper(
+        self,
+        agent_id: str,
+        flow_name: str,
+        inputs: Dict[str, Any],
+        model_override: Optional[str]
+    ) -> Tuple[str, Dict[str, int], Optional[Dict[str, Any]]]:
+        """
+        Agent/Flow 执行包装器，用于并发执行
+        
+        Args:
+            agent_id: Agent ID
+            flow_name: Flow 名称
+            inputs: 输入参数
+            model_override: 模型覆盖
+            
+        Returns:
+            (输出内容, token使用统计, parser统计) 元组
+        """
+        return self._execute_agent_flow(agent_id, flow_name, inputs, model_override)
     
     def _collect_final_outputs(self) -> Dict[str, Any]:
         """收集最终输出"""

@@ -66,17 +66,20 @@ Pipeline（工作流编排）
 - **数据与标签管理**：按 Agent/Pipeline 组织测试集、运行结果和评估数据，支持标签过滤、批量导入与结果导出。
 
 ## 项目结构
+
 ```
 prompt-lab/
-├── agents/                  # 现有 Agent 配置与 Prompt 模板
-├── data/                    # 评估与运行生成的数据（含 demo pipeline 运行结果）
-├── docs/                    # 详细指南与参考资料
-├── examples/                # 示例数据与脚本
-├── prompts/                 # 共享 Prompt 片段或模板
-├── src/                     # CLI、评估管线与模板解析核心代码
-├── templates/               # 系统提示词、用户输入与测试用例模板
-└── tests/                   # 自动化测试
+├── agents/                  # 生产和系统 Agent
+├── data/                    # 运行数据和评估结果
+├── docs/                    # 项目文档
+├── examples/                # 示例 Agent、Pipeline 和脚本
+├── pipelines/               # 生产 Pipeline 配置
+├── src/                     # 源代码
+├── templates/               # Agent 模板（用于生成新 Agent）
+└── tests/                   # 测试代码和测试固件
 ```
+
+详细的项目结构说明请查看 [docs/reference/project-structure.md](docs/reference/project-structure.md)
 
 ## 快速开始
 ### 1. 环境准备
@@ -231,233 +234,130 @@ python -m src baseline show --agent my_agent --name production
 ```
 
 ### 6. Agent Template Parser 快速用法
-- **CLI 生成配置**
-  ```bash
-  python -m src.agent_template_parser.cli create-agent \
-    --system-prompt templates/system_prompts/my_agent_system.txt \
-    --user-input templates/user_inputs/my_agent_user.txt \
-    --test-case templates/test_cases/my_agent_test.json \
-    --agent-name my_agent
-  
-  python -m src.agent_template_parser.cli create-testset \
-    --json-files data/*.json \
-    --target-agent my_agent \
-    --output-filename batch_testset.jsonl
-  ```
-- **Python API 示例**
-  ```python
-  from src.agent_template_parser import TemplateManager, TemplateParser, AgentConfigGenerator
+```bash
+# 从模板创建 Agent
+python -m src.agent_template_parser.cli create-agent my_agent
 
-  tm = TemplateManager()
-  parser = TemplateParser()
-  generator = AgentConfigGenerator()
+# 批量创建测试集
+python -m src.agent_template_parser.cli create-testset \
+  --json-files data/*.json \
+  --target-agent my_agent \
+  --output-filename batch_testset.jsonl
+```
 
-  system_prompt = Path("templates/system_prompts/demo_system.txt").read_text()
-  user_input = Path("templates/user_inputs/demo_user.txt").read_text()
-  test_case = Path("templates/test_cases/demo_test.json").read_text()
-
-  parsed = parser.create_parsed_template(
-      parser.parse_system_prompt(system_prompt),
-      parser.parse_user_input(user_input),
-      parser.parse_test_case(test_case),
-  )
-  agent_cfg = generator.generate_agent_yaml(parsed, "demo_agent")
-  prompt_cfg = generator.generate_prompt_yaml(parsed, "demo_agent", system_prompt, user_input)
-  generator.save_config_files(agent_cfg, prompt_cfg, "demo_agent")
-  ```
+详细使用说明请参考 [Agent Template Parser 指南](docs/reference/agent-template-parser-guide.md)
 
 ### 7. 数据与测试集
-- 测试集使用 JSONL 格式，支持自定义 `tags`，文件通常放在 `agents/<agent_id>/testsets/`。
-- 运行与评估结果分别存储在 `data/agents/<agent_id>/runs|evals` 下；Pipeline 运行结果位于 `data/pipelines/<pipeline_id>/runs/`。
-- 可用 `python -m src export` 系列命令导出 CSV/JSON 报告。
+- 测试集使用 JSONL 格式，支持自定义 `tags`
+- 运行与评估结果存储在 `data/` 目录下
+- 详细说明请参考 [数据结构指南](docs/reference/data-structure-guide.md)
+
+### 8. API 服务
+Prompt Lab 提供完整的 RESTful API，支持程序化访问所有核心功能：
+
+```bash
+# 启动 API 服务
+python -m src.api.app
+
+# 或使用 uvicorn
+uvicorn src.api.app:app --reload --port 8000
+```
+
+**API 端点示例**：
+```bash
+# 列出所有 Agent
+curl http://localhost:8000/api/v1/agents
+
+# 执行 Agent Flow
+curl -X POST http://localhost:8000/api/v1/agents/my_agent/flows/default/execute \
+  -H "Content-Type: application/json" \
+  -d '{"inputs": {"text": "Hello"}}'
+
+# 异步执行 Pipeline
+curl -X POST http://localhost:8000/api/v1/executions \
+  -H "Content-Type: application/json" \
+  -d '{"type": "pipeline", "target_id": "my_pipeline", "inputs": {"input_text": "Test"}}'
+
+# 查询执行状态
+curl http://localhost:8000/api/v1/executions/{execution_id}
+```
+
+**API 文档**：
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+详细 API 规范请参考 [API Design Specification](docs/reference/api-design-specification.md)
 
 ## 典型场景
 - **新 Flow 开发**：编辑 `agents/<agent>/prompts/*.yaml` → `python -m src eval --agent <agent> --flows new_flow --judge` → 与现有 Flow 对比 → 覆盖基线。
 - **Pipeline 迭代**：准备 Pipeline 配置 → `python -m src eval --pipeline <id> --variants baseline,candidate --judge` → 回归检测 → 更新基线。
 - **批量测试集生成**：整理 JSON 数据 → `create-testset` 生成标准化测试集 → 标签化后用于评估或回归。
 
-## 故障排除速查
-- **模块导入/依赖问题**：确保在项目根目录执行并安装依赖，可必要时设置 `PYTHONPATH=$(pwd)`。
-- **模板解析失败**：检查文件编码为 UTF-8、JSON 语法合法，并确认变量格式符合模板约定（如 `${sys.user_input}`）。
-- **批量处理/文件路径错误**：确认目标 Agent 目录存在且具备写权限；使用绝对路径或从项目根目录运行命令。
-- **LLM 增强异常**：检查网络、API Key，或添加 `--no-llm-enhancement` 禁用增强。
+## 故障排除
+
+常见问题和解决方案请参考 [故障排除指南](docs/TROUBLESHOOTING.md)
 
 ## 开发与测试
-```bash
-# 运行核心测试（示例）
-python -m pytest tests/test_cli.py -k create_agent_from_templates_success -v
 
-# 代码格式与质量（可选）
+```bash
+# 运行测试
+python -m pytest tests/ -v
+
+# 代码格式检查
 black src/ tests/
 flake8 src/ tests/
-mypy src/
 ```
+
+详细的开发指南请参考 [使用指南](docs/USAGE_GUIDE.md)
 
 欢迎在 `issues` 中反馈问题或提交 PR 改进平台体验。
 
 ## 系统架构
 
-### 核心组件
+Prompt Lab 基于 LangChain 构建，采用分层架构设计。详细的架构说明请参考：
 
-Prompt Lab 基于 LangChain 构建，采用分层架构设计：
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     配置层 (Configuration)                   │
-│  Agent Config ──→ Flow Config ──→ Pipeline Config           │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                     执行层 (Execution)                       │
-│  ┌──────────────────────────────────────────────────┐      │
-│  │  Flow Executor (chains.py)                       │      │
-│  │  ChatPromptTemplate → ChatOpenAI → OutputParser  │      │
-│  └──────────────────────────────────────────────────┘      │
-│  ┌──────────────────────────────────────────────────┐      │
-│  │  Pipeline Runner (pipeline_runner.py)            │      │
-│  │  步骤编排 → 数据传递 → 错误处理                   │      │
-│  └──────────────────────────────────────────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                     评估层 (Evaluation)                      │
-│  统一评估接口 → 规则引擎 + Judge Agent                       │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**核心组件说明**：
-
-1. **Agent**：业务任务单元，包含配置、提示词版本和评估标准
-2. **Flow**：可执行的 LangChain Chain，是 Agent 的具体实现版本
-3. **Pipeline**：多步骤工作流，串联多个 Agent/Flow
-4. **Output Parser**：结构化输出解析器，确保 LLM 输出格式可靠
-5. **Unified Evaluator**：统一评估接口，支持规则评估和 Judge 评估
-
-### 数据流
-
-```
-测试集 (JSONL) → Pipeline/Agent → LLM 调用 → Output Parser → 评估 → 结果报告
-```
-
-### 与 LangChain 生态的关系
-
-Prompt Lab 充分利用 LangChain 的核心能力：
-
-| LangChain 概念 | Prompt Lab 实现 | 状态 |
-|---------------|----------------|------|
-| **Chain** | Flow | ✅ 已实现 |
-| **SequentialChain** | Pipeline | ✅ 已实现 |
-| **Prompt Template** | Flow YAML | ✅ 已实现 |
-| **Output Parser** | Output Parser 配置 | ✅ 已实现 |
-| **LLM** | ChatOpenAI | ✅ 已实现 |
-| **Memory** | - | 📋 计划中 |
-| **Tools** | - | 📋 计划中 |
-| **Retriever** | - | 📋 计划中 |
-| **Router** | - | 📋 计划中 |
-| **Autonomous Agents** | - | 📋 计划中 |
-
-详细的架构分析和缺失维度评估，请参考 [架构分析文档](docs/ARCHITECTURE_ANALYSIS.md)。
+- [系统架构文档](docs/ARCHITECTURE.md) - 完整的架构说明和组件详解
+- [架构分析文档](docs/ARCHITECTURE_ANALYSIS.md) - 与 LangChain 生态对比和演进规划
 
 ## 开发路线图
 
-### ✅ 已完成功能
+### ✅ 已完成功能 (v0.8)
+- Agent 配置管理和版本控制
+- Flow 执行和对比
+- Pipeline 多步骤工作流
+- 规则评估和 LLM Judge 评估
+- 基线管理和回归测试
+- Agent Template Parser
+- Output Parser 结构化输出解析
+- **批量处理系统** - 支持批量步骤执行和多种聚合策略
+- **并发执行引擎** - 依赖分析、并发组调度、同步点等待
+- **Code Node 执行** - 支持 Python/JavaScript 代码节点
+- **RESTful API** - 完整的 Agent/Pipeline 管理和执行 API
+- **进度跟踪** - 实时执行进度监控
+- **断点续传** - 支持长时间任务的恢复执行
 
-**核心功能**：
-- ✅ Agent 配置管理和版本控制
-- ✅ Flow 执行和对比
-- ✅ Pipeline 多步骤工作流
-- ✅ 规则评估和 LLM Judge 评估
-- ✅ 基线管理和回归测试
-- ✅ Agent Template Parser（模板解析和配置生成）
+### 📋 规划中功能 (v1.0+)
+- Memory 系统（多轮对话支持）
+- Streaming 输出（流式响应）
+- Tools 集成（函数调用）
+- RAG 支持（检索增强生成）
+- 可视化编辑器
+- API 认证和权限控制
 
-**最新增强**（v1.1）：
-- ✅ **Output Parser**：支持 JSON、Pydantic、List 等结构化输出解析
-- ✅ **统一评估接口**：Agent 和 Pipeline 使用相同的评估机制
-- ✅ **Pipeline 示例**：提供完整的文档处理和客服流程示例
-- ✅ **性能监控**：执行时间、Token 使用量、解析成功率统计
-- ✅ **错误处理增强**：Output Parser 自动重试和降级处理
-- ✅ **配置验证**：循环依赖检测、引用完整性检查
+详细的功能规划请参考 [架构分析文档](docs/ARCHITECTURE_ANALYSIS.md)
 
-### 🔄 进行中功能
+## 📚 文档导航
 
-- 🔄 **文档完善**：系统架构文档、Output Parser 使用指南
-- 🔄 **测试覆盖**：集成测试、向后兼容性测试
+- **快速参考**: [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - 常用命令和快速查找
+- **完整文档**: [docs/README.md](docs/README.md) - 完整的文档索引和导航
 
-### 📋 短期规划（1-2 个月）
-
-1. **Memory 系统**：支持多轮对话和 Pipeline 状态管理
-   - ConversationBufferMemory
-   - ConversationSummaryMemory
-   - Pipeline 步骤间记忆传递
-
-2. **Streaming 输出**：支持流式输出和实时反馈
-   - 流式 LLM 调用
-   - 实时进度显示
-   - 中间结果预览
-
-3. **并行执行**：Pipeline 步骤的并行执行优化
-   - 独立步骤并行化
-   - 依赖分析和调度
-   - 性能提升
-
-### 📋 中期规划（3-6 个月）
-
-4. **Tools 集成**：支持函数调用和外部系统集成
-   - Function Calling
-   - API 集成
-   - 数据库查询
-   - 文件操作
-
-5. **Retriever**：支持 RAG（检索增强生成）
-   - 向量数据库集成
-   - 文档检索
-   - 上下文压缩
-   - 混合检索
-
-6. **Router**：支持条件分支和动态路由
-   - LLM Router
-   - 条件分支
-   - 动态步骤选择
-
-### 📋 长期规划（6-12 个月）
-
-7. **Autonomous Agents**：实现真正的自主决策 Agent
-   - ReAct 模式
-   - Plan-and-Execute
-   - 自主工具选择
-
-8. **可视化编辑器**：Pipeline 的图形化配置界面
-   - 拖拽式 Pipeline 构建
-   - 实时预览
-   - 可视化调试
-
-9. **分布式执行**：支持分布式 Pipeline 执行
-   - 任务队列
-   - 分布式调度
-   - 结果聚合
-
-详细的功能规划和优先级分析，请参考 [架构分析文档](docs/ARCHITECTURE_ANALYSIS.md)。
-
-## 文档导航
-
-### 📚 核心文档
+### 核心文档
 - [使用指南](docs/USAGE_GUIDE.md) - 详细的功能使用说明
 - [系统架构](docs/ARCHITECTURE.md) - 完整的系统架构说明和组件详解
-- [架构分析](docs/ARCHITECTURE_ANALYSIS.md) - 与 LangChain 生态对比和演进规划
 - [故障排除](docs/TROUBLESHOOTING.md) - 常见问题和解决方案
 
-### 📖 参考文档
+### 常用指南
 - [Pipeline 配置指南](docs/reference/pipeline-guide.md) - Pipeline 配置语法和最佳实践
-- [Output Parser 快速指南](OUTPUT_PARSER_USAGE.md) - Output Parser 快速开始
-- [Output Parser 详细指南](docs/reference/output-parser-guide.md) - Output Parser 完整使用文档
+- [Output Parser 使用指南](docs/guides/output-parser-usage.md) - Output Parser 快速开始
+- [Agent 管理指南](docs/guides/agent-management.md) - Agent 分类、管理和最佳实践
 - [评估模式指南](docs/reference/eval-modes-guide.md) - 评估系统详解
-- [回归测试指南](docs/reference/regression-testing.md) - 基线管理和回归测试
-- [数据结构指南](docs/reference/data-structure-guide.md) - 数据格式和组织
-- [评估规则参考](docs/reference/evaluation-rules.md) - 规则评估配置
-- [手动评估指南](docs/reference/manual-eval-guide.md) - 手动评估流程
-- [项目结构说明](docs/reference/project-structure.md) - 目录结构详解
-- [迁移指南](docs/reference/migration-guide.md) - 版本升级指南
-
-### 🔧 开发文档
-- [Agent Template Parser](src/agent_template_parser/README.md) - 模板解析器使用
-- [Big Thing Agent 指南](docs/big_thing_agent_guide.md) - Big Thing Agent 使用示例

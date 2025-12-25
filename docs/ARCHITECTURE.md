@@ -641,5 +641,5 @@ class PipelineRunner:
 
 - [架构分析文档](ARCHITECTURE_ANALYSIS.md) - 与 LangChain 生态的对比
 - [Pipeline 配置指南](reference/pipeline-guide.md) - Pipeline 详细配置
-- [Output Parser 使用指南](../OUTPUT_PARSER_USAGE.md) - Output Parser 配置和使用
+- [Output Parser 使用指南](guides/output-parser-usage.md) - Output Parser 配置和使用
 - [评估模式指南](reference/eval-modes-guide.md) - 评估系统详解

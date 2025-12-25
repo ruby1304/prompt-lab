@@ -1,0 +1,20 @@
+default_testset: ''
+description: A newly created pipeline
+id: new_test_pipeline
+inputs:
+- desc: Input text
+  name: text
+  required: true
+name: New Test Pipeline
+outputs:
+- key: result
+  label: Result
+steps:
+- agent: judge_default
+  flow: judge_v1
+  id: process
+  input_mapping:
+    text: text
+  output_key: result
+  type: agent_flow
+version: 1.0.0

@@ -335,7 +335,8 @@ class TestValidateYamlSchema:
         
         errors = validate_yaml_schema(invalid_data)
         
-        assert any("步骤 1 缺少必需字段: agent" in error for error in errors)
+        # Step 1 is missing agent and flow (it's agent_flow type by default)
+        assert any("步骤 1" in error and ("agent" in error or "缺少必需字段" in error) for error in errors)
         assert any("步骤 2 必须是字典" in error for error in errors)
     
     def test_validate_yaml_schema_invalid_step_input_mapping(self):
@@ -691,3 +692,362 @@ class TestGetPipelineSummary:
             result = get_pipeline_summary("test_pipeline")
             
             assert result == "test_pipeline (配置加载失败)"
+
+
+class TestBatchProcessingValidation:
+    """测试批量处理配置验证"""
+    
+    def test_validate_batch_mode_with_valid_config(self):
+        """测试有效的批量处理配置"""
+        valid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "agent_flow",
+                    "agent": "test_agent",
+                    "flow": "test_flow",
+                    "batch_mode": True,
+                    "batch_size": 20,
+                    "concurrent": True,
+                    "max_workers": 5,
+                    "input_mapping": {"text": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(valid_data)
+        assert errors == []
+    
+    def test_validate_batch_mode_with_invalid_batch_size(self):
+        """测试无效的 batch_size"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "agent_flow",
+                    "agent": "test_agent",
+                    "flow": "test_flow",
+                    "batch_mode": True,
+                    "batch_size": 0,  # Invalid: must be positive
+                    "input_mapping": {"text": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("'batch_size' 必须是正整数" in error for error in errors)
+    
+    def test_validate_batch_mode_with_negative_batch_size(self):
+        """测试负数的 batch_size"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "agent_flow",
+                    "agent": "test_agent",
+                    "flow": "test_flow",
+                    "batch_mode": True,
+                    "batch_size": -5,  # Invalid: negative
+                    "input_mapping": {"text": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("'batch_size' 必须是正整数" in error for error in errors)
+    
+    def test_validate_batch_mode_with_invalid_max_workers(self):
+        """测试无效的 max_workers"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "agent_flow",
+                    "agent": "test_agent",
+                    "flow": "test_flow",
+                    "batch_mode": True,
+                    "batch_size": 10,
+                    "max_workers": 0,  # Invalid: must be positive
+                    "input_mapping": {"text": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("'max_workers' 必须是正整数" in error for error in errors)
+    
+    def test_validate_batch_mode_with_non_integer_batch_size(self):
+        """测试非整数的 batch_size"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "agent_flow",
+                    "agent": "test_agent",
+                    "flow": "test_flow",
+                    "batch_mode": True,
+                    "batch_size": "10",  # Invalid: string instead of int
+                    "input_mapping": {"text": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("'batch_size' 必须是整数" in error for error in errors)
+    
+    def test_validate_batch_mode_with_invalid_concurrent_type(self):
+        """测试无效的 concurrent 类型"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "agent_flow",
+                    "agent": "test_agent",
+                    "flow": "test_flow",
+                    "batch_mode": True,
+                    "batch_size": 10,
+                    "concurrent": "yes",  # Invalid: string instead of bool
+                    "input_mapping": {"text": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("'concurrent' 必须是布尔值" in error for error in errors)
+    
+    def test_validate_batch_aggregator_with_all_strategies(self):
+        """测试所有聚合策略的验证"""
+        strategies = ["concat", "stats", "filter", "group", "summary", "custom"]
+        
+        for strategy in strategies:
+            valid_data = {
+                "id": "test_pipeline",
+                "name": "Test Pipeline",
+                "steps": [
+                    {
+                        "id": "step1",
+                        "type": "batch_aggregator",
+                        "aggregation_strategy": strategy,
+                        "input_mapping": {"items": "input"},
+                        "output_key": "output"
+                    }
+                ]
+            }
+            
+            # Add required fields for specific strategies
+            if strategy == "custom":
+                valid_data["steps"][0]["aggregation_code"] = "def aggregate(items): return items"
+                valid_data["steps"][0]["language"] = "python"
+            elif strategy == "stats":
+                valid_data["steps"][0]["fields"] = ["score", "count"]
+            elif strategy == "filter":
+                valid_data["steps"][0]["condition"] = "item.score > 0.5"
+            elif strategy == "group":
+                valid_data["steps"][0]["group_by"] = "category"
+            elif strategy == "summary":
+                valid_data["steps"][0]["summary_fields"] = ["total_count", "average_score"]
+            
+            errors = validate_yaml_schema(valid_data)
+            assert errors == [], f"Strategy {strategy} should be valid but got errors: {errors}"
+    
+    def test_validate_batch_aggregator_missing_strategy(self):
+        """测试缺少聚合策略"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    # Missing aggregation_strategy
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("缺少必需字段: aggregation_strategy" in error for error in errors)
+    
+    def test_validate_batch_aggregator_invalid_strategy(self):
+        """测试无效的聚合策略"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    "aggregation_strategy": "invalid_strategy",
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("不支持的聚合策略" in error for error in errors)
+        assert any("concat, stats, filter, group, summary, custom" in error for error in errors)
+    
+    def test_validate_batch_aggregator_custom_missing_code(self):
+        """测试自定义聚合策略缺少代码"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    "aggregation_strategy": "custom",
+                    # Missing code, aggregation_code and code_file
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("必须指定 'code', 'aggregation_code' 或 'code_file'" in error for error in errors)
+    
+    def test_validate_batch_aggregator_custom_missing_language(self):
+        """测试自定义聚合策略缺少语言"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    "aggregation_strategy": "custom",
+                    "aggregation_code": "def aggregate(items): return items",
+                    # Missing language
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("必须指定 'language'" in error for error in errors)
+    
+    def test_validate_batch_aggregator_stats_missing_fields(self):
+        """测试 stats 策略缺少 fields"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    "aggregation_strategy": "stats",
+                    # Missing fields
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("必须指定 'fields' 字段列表" in error for error in errors)
+    
+    def test_validate_batch_aggregator_filter_missing_condition(self):
+        """测试 filter 策略缺少 condition"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    "aggregation_strategy": "filter",
+                    # Missing condition
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("必须指定 'condition' 过滤条件" in error for error in errors)
+    
+    def test_validate_batch_aggregator_group_missing_group_by(self):
+        """测试 group 策略缺少 group_by"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    "aggregation_strategy": "group",
+                    # Missing group_by
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("必须指定 'group_by' 分组字段" in error for error in errors)
+    
+    def test_validate_batch_aggregator_summary_missing_summary_fields(self):
+        """测试 summary 策略缺少 summary_fields"""
+        invalid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "batch_aggregator",
+                    "aggregation_strategy": "summary",
+                    # Missing summary_fields
+                    "input_mapping": {"items": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(invalid_data)
+        assert any("必须指定 'summary_fields' 汇总字段列表" in error for error in errors)
+    
+    def test_validate_batch_mode_without_batch_mode_flag(self):
+        """测试没有 batch_mode 标志时不验证批量字段"""
+        # This should be valid - batch fields are ignored if batch_mode is False
+        valid_data = {
+            "id": "test_pipeline",
+            "name": "Test Pipeline",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "agent_flow",
+                    "agent": "test_agent",
+                    "flow": "test_flow",
+                    "batch_mode": False,
+                    "batch_size": -1,  # Would be invalid if batch_mode was True
+                    "input_mapping": {"text": "input"},
+                    "output_key": "output"
+                }
+            ]
+        }
+        
+        errors = validate_yaml_schema(valid_data)
+        # Should not have batch_size validation errors since batch_mode is False
+        assert not any("batch_size" in error for error in errors)

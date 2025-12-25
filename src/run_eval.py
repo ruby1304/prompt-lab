@@ -392,7 +392,7 @@ def run_eval(
         # 执行每个flow
         for flow_name in flow_list:
             console.print(f"  -> Running flow: [cyan]{flow_name}[/cyan]")
-            output, token_info = run_flow_with_tokens(flow_name, extra_vars=variables, agent_id=agent_cfg.id)
+            output, token_info, _parser_stats = run_flow_with_tokens(flow_name, extra_vars=variables, agent_id=agent_cfg.id)
             
             # 保存结果
             if len(flow_list) == 1:

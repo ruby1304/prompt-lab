@@ -167,7 +167,7 @@ def run(
         console.print(f"[{idx}/{len(cases)}] id={_id}  variables={display_info!r}")
 
         agent_id = agent_cfg.id if agent_cfg else None
-        output, token_info = run_flow_with_tokens(flow, extra_vars=variables, agent_id=agent_id)
+        output, token_info, _parser_stats = run_flow_with_tokens(flow, extra_vars=variables, agent_id=agent_id)
         
         # 累计token统计
         for key in total_tokens:

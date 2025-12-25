@@ -63,7 +63,7 @@ def main():
         print(f"   🔄 使用 flow: {flow.name}")
         
         # 运行 agent
-        result, token_usage = run_flow_with_tokens(
+        result, token_usage, _parser_stats = run_flow_with_tokens(
             flow_name=flow.name,
             input_text=test_input,
             agent_id=agent.id,

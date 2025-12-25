@@ -1,0 +1,407 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prompt-lab.io/schemas/batch-processing.schema.json",
+  "title": "Batch Processing Configuration Schema",
+  "description": "JSON Schema for batch processing and aggregation configuration in Prompt Lab pipelines",
+  "version": "1.0.0",
+  
+  "definitions": {
+    "batchStepConfig": {
+      "type": "object",
+      "description": "Configuration for a batch processing step",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the step",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["agent_flow", "code_node"],
+          "description": "Type of step (must support batch mode)"
+        },
+        "batch_mode": {
+          "type": "boolean",
+          "const": true,
+          "description": "Must be true to enable batch processing"
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 10,
+          "description": "Number of items to process per batch"
+        },
+        "concurrent": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable concurrent processing of batch items"
+        },
+        "max_workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 4,
+          "description": "Maximum number of concurrent workers"
+        },
+        "input_mapping": {
+          "type": "object",
+          "description": "Maps input parameters to data sources",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Key for storing batch results",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout per batch item in seconds"
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the batch step must succeed"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the step"
+        }
+      },
+      "required": ["id", "type", "batch_mode", "input_mapping", "output_key"]
+    },
+    
+    "aggregationStrategy": {
+      "type": "string",
+      "enum": ["concat", "stats", "filter", "group", "summary", "custom"],
+      "description": "Built-in aggregation strategy type"
+    },
+    
+    "concatAggregatorConfig": {
+      "type": "object",
+      "description": "Configuration for concat aggregation strategy",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "const": "batch_aggregator"
+        },
+        "aggregation_strategy": {
+          "type": "string",
+          "const": "concat"
+        },
+        "separator": {
+          "type": "string",
+          "default": "\n",
+          "description": "Separator string between concatenated items"
+        },
+        "input_mapping": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "string",
+              "description": "Source of items to concatenate"
+            }
+          },
+          "required": ["items"]
+        },
+        "output_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        }
+      },
+      "required": ["id", "type", "aggregation_strategy", "input_mapping", "output_key"]
+    },
+    
+    "statsAggregatorConfig": {
+      "type": "object",
+      "description": "Configuration for stats aggregation strategy",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "const": "batch_aggregator"
+        },
+        "aggregation_strategy": {
+          "type": "string",
+          "const": "stats"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Fields to compute statistics for"
+        },
+        "input_mapping": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "string",
+              "description": "Source of items to analyze"
+            }
+          },
+          "required": ["items"]
+        },
+        "output_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        }
+      },
+      "required": ["id", "type", "aggregation_strategy", "fields", "input_mapping", "output_key"]
+    },
+    
+    "filterAggregatorConfig": {
+      "type": "object",
+      "description": "Configuration for filter aggregation strategy",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "const": "batch_aggregator"
+        },
+        "aggregation_strategy": {
+          "type": "string",
+          "const": "filter"
+        },
+        "condition": {
+          "type": "string",
+          "description": "Filter condition expression (e.g., 'item.score > 0.7')"
+        },
+        "input_mapping": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "string",
+              "description": "Source of items to filter"
+            }
+          },
+          "required": ["items"]
+        },
+        "output_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        }
+      },
+      "required": ["id", "type", "aggregation_strategy", "condition", "input_mapping", "output_key"]
+    },
+    
+    "groupAggregatorConfig": {
+      "type": "object",
+      "description": "Configuration for group aggregation strategy",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "const": "batch_aggregator"
+        },
+        "aggregation_strategy": {
+          "type": "string",
+          "const": "group"
+        },
+        "group_by": {
+          "type": "string",
+          "description": "Field name to group items by"
+        },
+        "input_mapping": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "string",
+              "description": "Source of items to group"
+            }
+          },
+          "required": ["items"]
+        },
+        "output_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        }
+      },
+      "required": ["id", "type", "aggregation_strategy", "group_by", "input_mapping", "output_key"]
+    },
+    
+    "summaryAggregatorConfig": {
+      "type": "object",
+      "description": "Configuration for summary aggregation strategy",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "const": "batch_aggregator"
+        },
+        "aggregation_strategy": {
+          "type": "string",
+          "const": "summary"
+        },
+        "summary_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["total_count", "success_count", "failure_count", "average_score", "success_rate"]
+          },
+          "minItems": 1,
+          "description": "Fields to include in summary"
+        },
+        "input_mapping": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "string",
+              "description": "Source of items to summarize"
+            }
+          },
+          "required": ["items"]
+        },
+        "output_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        }
+      },
+      "required": ["id", "type", "aggregation_strategy", "summary_fields", "input_mapping", "output_key"]
+    },
+    
+    "customAggregatorConfig": {
+      "type": "object",
+      "description": "Configuration for custom aggregation strategy",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "const": "batch_aggregator"
+        },
+        "aggregation_strategy": {
+          "type": "string",
+          "const": "custom"
+        },
+        "language": {
+          "type": "string",
+          "enum": ["python", "javascript"],
+          "description": "Programming language for custom aggregation code"
+        },
+        "code": {
+          "type": "string",
+          "description": "Inline custom aggregation code"
+        },
+        "code_file": {
+          "type": "string",
+          "description": "Path to external file containing aggregation code"
+        },
+        "input_mapping": {
+          "type": "object",
+          "description": "Maps input parameters to data sources",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "output_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Timeout for aggregation execution in seconds"
+        }
+      },
+      "required": ["id", "type", "aggregation_strategy", "language", "input_mapping", "output_key"],
+      "oneOf": [
+        {
+          "required": ["code"]
+        },
+        {
+          "required": ["code_file"]
+        }
+      ]
+    },
+    
+    "batchTestCase": {
+      "type": "object",
+      "description": "Test case for batch processing pipeline",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique test case identifier"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tags for categorizing test cases"
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Input data for the pipeline (must include batch data)",
+          "additionalProperties": true
+        },
+        "expected_outputs": {
+          "type": "object",
+          "description": "Expected outputs from the pipeline",
+          "additionalProperties": true
+        },
+        "expected_aggregation": {
+          "type": "object",
+          "description": "Expected aggregation results",
+          "additionalProperties": true
+        }
+      },
+      "required": ["id", "inputs"]
+    }
+  },
+  
+  "type": "object",
+  "properties": {
+    "batch_steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/batchStepConfig"
+      },
+      "description": "Array of batch processing step configurations"
+    },
+    "aggregation_steps": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/definitions/concatAggregatorConfig"},
+          {"$ref": "#/definitions/statsAggregatorConfig"},
+          {"$ref": "#/definitions/filterAggregatorConfig"},
+          {"$ref": "#/definitions/groupAggregatorConfig"},
+          {"$ref": "#/definitions/summaryAggregatorConfig"},
+          {"$ref": "#/definitions/customAggregatorConfig"}
+        ]
+      },
+      "description": "Array of aggregation step configurations"
+    },
+    "test_cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/batchTestCase"
+      },
+      "description": "Test cases for batch processing"
+    }
+  }
+}

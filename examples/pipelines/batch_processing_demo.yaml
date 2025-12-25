@@ -1,0 +1,336 @@
+# Batch Processing Demonstration Pipeline
+# This pipeline shows various batch processing and aggregation strategies
+
+id: "batch_processing_demo"
+name: "Batch Processing Demo"
+description: |
+  Comprehensive example demonstrating batch processing capabilities:
+  - Batch mode execution
+  - Multiple aggregation strategies (concat, stats, filter, group, custom)
+  - Error handling in batch processing
+  - Multi-stage batch workflows
+
+inputs:
+  - name: "customer_reviews"
+    desc: "List of customer reviews to analyze"
+    required: true
+  - name: "sentiment_threshold"
+    desc: "Threshold for sentiment filtering (0-1)"
+    required: false
+
+steps:
+  # ============================================================================
+  # STAGE 1: Batch Processing with Agent
+  # ============================================================================
+  
+  # Step 1: Analyze sentiment for each review (batch mode)
+  - id: "analyze_sentiment"
+    type: "agent_flow"
+    agent: "mem0_l1_summarizer"
+    flow: "mem0_l1_v1"
+    batch_mode: true
+    batch_size: 20                    # Process 20 reviews at a time
+    concurrent: true                  # Enable concurrent processing
+    max_workers: 5                    # Use 5 workers
+    input_mapping:
+      text: "customer_reviews"
+    output_key: "sentiment_results"
+    timeout: 60
+    description: "Analyze sentiment for each customer review"
+    required: true
+
+  # ============================================================================
+  # STAGE 2: Aggregation Strategy Examples
+  # ============================================================================
+
+  # Step 2a: Concatenate all sentiment analyses
+  - id: "concat_sentiments"
+    type: "batch_aggregator"
+    aggregation_strategy: "concat"
+    separator: "\n\n---\n\n"
+    input_mapping:
+      items: "sentiment_results"
+    output_key: "concatenated_sentiments"
+    description: "Concatenate all sentiment analyses"
+    required: true
+
+  # Step 2b: Compute statistics on sentiment scores
+  - id: "compute_sentiment_stats"
+    type: "batch_aggregator"
+    aggregation_strategy: "stats"
+    fields:
+      - "sentiment_score"
+      - "confidence"
+      - "word_count"
+    input_mapping:
+      items: "sentiment_results"
+    output_key: "sentiment_statistics"
+    description: "Compute statistical metrics"
+    required: true
+
+  # Step 2c: Filter high-sentiment reviews
+  - id: "filter_positive_reviews"
+    type: "batch_aggregator"
+    aggregation_strategy: "filter"
+    condition: "item.sentiment_score > 0.7"
+    input_mapping:
+      items: "sentiment_results"
+    output_key: "positive_reviews"
+    description: "Filter reviews with positive sentiment"
+    required: true
+
+  # Step 2d: Group reviews by sentiment category
+  - id: "group_by_sentiment"
+    type: "batch_aggregator"
+    aggregation_strategy: "group"
+    group_by: "sentiment_category"
+    input_mapping:
+      items: "sentiment_results"
+    output_key: "grouped_sentiments"
+    description: "Group reviews by sentiment category"
+    required: true
+
+  # Step 2e: Create summary of batch results
+  - id: "summarize_batch"
+    type: "batch_aggregator"
+    aggregation_strategy: "summary"
+    summary_fields:
+      - "total_count"
+      - "success_count"
+      - "failure_count"
+      - "average_score"
+    input_mapping:
+      items: "sentiment_results"
+    output_key: "batch_summary"
+    description: "Create summary of batch processing"
+    required: true
+
+  # ============================================================================
+  # STAGE 3: Custom Aggregation Examples
+  # ============================================================================
+
+  # Step 3a: Custom Python aggregation
+  - id: "custom_python_aggregation"
+    type: "batch_aggregator"
+    aggregation_strategy: "custom"
+    language: "python"
+    code: |
+      def aggregate(items):
+        """
+        Custom aggregation: Analyze sentiment distribution and trends
+        """
+        # Separate by sentiment
+        positive = [item for item in items if item.get('sentiment_score', 0) > 0.6]
+        neutral = [item for item in items if 0.4 <= item.get('sentiment_score', 0) <= 0.6]
+        negative = [item for item in items if item.get('sentiment_score', 0) < 0.4]
+        
+        # Extract key themes from positive reviews
+        positive_themes = []
+        for review in positive:
+          themes = review.get('themes', [])
+          positive_themes.extend(themes)
+        
+        # Count theme frequency
+        theme_counts = {}
+        for theme in positive_themes:
+          theme_counts[theme] = theme_counts.get(theme, 0) + 1
+        
+        # Get top themes
+        top_themes = sorted(theme_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        return {
+          'distribution': {
+            'positive': len(positive),
+            'neutral': len(neutral),
+            'negative': len(negative),
+            'positive_percentage': len(positive) / len(items) * 100 if items else 0
+          },
+          'top_positive_themes': [{'theme': t[0], 'count': t[1]} for t in top_themes],
+          'average_scores': {
+            'positive': sum(r.get('sentiment_score', 0) for r in positive) / len(positive) if positive else 0,
+            'neutral': sum(r.get('sentiment_score', 0) for r in neutral) / len(neutral) if neutral else 0,
+            'negative': sum(r.get('sentiment_score', 0) for r in negative) / len(negative) if negative else 0
+          }
+        }
+    input_mapping:
+      items: "sentiment_results"
+    output_key: "sentiment_analysis"
+    timeout: 60
+    description: "Custom sentiment distribution analysis"
+    required: true
+
+  # Step 3b: Custom JavaScript aggregation
+  - id: "custom_js_aggregation"
+    type: "batch_aggregator"
+    aggregation_strategy: "custom"
+    language: "javascript"
+    code: |
+      function aggregate(items) {
+        // Calculate time-based trends
+        const byDate = items.reduce((acc, item) => {
+          const date = item.date || 'unknown';
+          if (!acc[date]) {
+            acc[date] = {
+              count: 0,
+              totalScore: 0,
+              reviews: []
+            };
+          }
+          acc[date].count++;
+          acc[date].totalScore += item.sentiment_score || 0;
+          acc[date].reviews.push(item);
+          return acc;
+        }, {});
+        
+        // Calculate average score per date
+        const trends = Object.entries(byDate).map(([date, data]) => ({
+          date: date,
+          count: data.count,
+          averageScore: data.totalScore / data.count,
+          reviews: data.reviews
+        }));
+        
+        // Sort by date
+        trends.sort((a, b) => a.date.localeCompare(b.date));
+        
+        return {
+          trends: trends,
+          totalDays: trends.length,
+          overallTrend: trends.length > 1 
+            ? trends[trends.length - 1].averageScore - trends[0].averageScore
+            : 0
+        };
+      }
+      
+      module.exports = aggregate;
+    input_mapping:
+      items: "sentiment_results"
+    output_key: "sentiment_trends"
+    timeout: 60
+    description: "Analyze sentiment trends over time"
+    required: true
+
+  # ============================================================================
+  # STAGE 4: Multi-Stage Batch Processing
+  # ============================================================================
+
+  # Step 4a: Extract key issues from negative reviews
+  - id: "extract_issues"
+    type: "agent_flow"
+    agent: "mem0_l1_summarizer"
+    flow: "mem0_l1_v1"
+    batch_mode: true
+    batch_size: 10
+    input_mapping:
+      text: "grouped_sentiments.negative"
+    output_key: "extracted_issues"
+    description: "Extract key issues from negative reviews"
+    required: false                   # Optional - don't halt if no negative reviews
+
+  # Step 4b: Aggregate issues by category
+  - id: "categorize_issues"
+    type: "batch_aggregator"
+    aggregation_strategy: "custom"
+    language: "python"
+    code: |
+      def aggregate(issues):
+        """Categorize and prioritize issues"""
+        if not issues:
+          return {'categories': {}, 'total_issues': 0}
+        
+        categories = {}
+        for issue in issues:
+          category = issue.get('category', 'uncategorized')
+          severity = issue.get('severity', 'medium')
+          
+          if category not in categories:
+            categories[category] = {
+              'count': 0,
+              'high_severity': 0,
+              'medium_severity': 0,
+              'low_severity': 0,
+              'issues': []
+            }
+          
+          categories[category]['count'] += 1
+          categories[category][f'{severity}_severity'] += 1
+          categories[category]['issues'].append(issue)
+        
+        # Sort categories by count
+        sorted_categories = dict(
+          sorted(categories.items(), key=lambda x: x[1]['count'], reverse=True)
+        )
+        
+        return {
+          'categories': sorted_categories,
+          'total_issues': len(issues),
+          'total_categories': len(categories)
+        }
+    input_mapping:
+      issues: "extracted_issues"
+    output_key: "categorized_issues"
+    description: "Categorize and prioritize issues"
+    required: false
+
+  # ============================================================================
+  # STAGE 5: Final Report Generation
+  # ============================================================================
+
+  # Step 5: Generate comprehensive report
+  - id: "generate_final_report"
+    type: "code_node"
+    language: "python"
+    code: |
+      def execute(stats, analysis, trends, issues, summary):
+        """Generate comprehensive analysis report"""
+        
+        report = {
+          'title': 'Customer Review Analysis Report',
+          'summary': {
+            'total_reviews': summary.get('total_count', 0),
+            'success_rate': summary.get('success_count', 0) / summary.get('total_count', 1) * 100,
+            'average_sentiment': stats.get('sentiment_score', {}).get('mean', 0)
+          },
+          'sentiment_distribution': analysis.get('distribution', {}),
+          'top_themes': analysis.get('top_positive_themes', []),
+          'trends': {
+            'total_days': trends.get('totalDays', 0),
+            'overall_trend': trends.get('overallTrend', 0),
+            'daily_data': trends.get('trends', [])
+          },
+          'issues': {
+            'total': issues.get('total_issues', 0) if issues else 0,
+            'categories': issues.get('categories', {}) if issues else {}
+          },
+          'statistics': {
+            'sentiment_score': stats.get('sentiment_score', {}),
+            'confidence': stats.get('confidence', {}),
+            'word_count': stats.get('word_count', {})
+          }
+        }
+        
+        return report
+    input_mapping:
+      stats: "sentiment_statistics"
+      analysis: "sentiment_analysis"
+      trends: "sentiment_trends"
+      issues: "categorized_issues"
+      summary: "batch_summary"
+    output_key: "final_report"
+    timeout: 30
+    description: "Generate comprehensive analysis report"
+    required: true
+
+outputs:
+  - key: "final_report"
+    label: "Comprehensive Analysis Report"
+  - key: "sentiment_statistics"
+    label: "Sentiment Statistics"
+  - key: "positive_reviews"
+    label: "Positive Reviews"
+  - key: "categorized_issues"
+    label: "Categorized Issues"
+
+# Default testset for this pipeline
+default_testset: "batch_processing_demo.jsonl"
+

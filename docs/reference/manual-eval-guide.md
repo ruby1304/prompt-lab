@@ -118,7 +118,7 @@ evaluation:
 python -m src.eval_rules list-rules
 ```
 
-详细的规则类型说明请参考 [EVALUATION_RULES.md](EVALUATION_RULES.md)
+详细的规则类型说明请参考 [EVALUATION_RULES.md](evaluation-rules.md)
 
 ## 使用场景
 
